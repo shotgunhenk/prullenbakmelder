@@ -254,9 +254,10 @@ const DB = (() => {
   });
   const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => {
     const t = db.transaction("meldingen", mode); const st = t.objectStore("meldingen");
-    const out = fn(st); t.oncomplete = () => res(out && out.result !== undefined ? out.result : out); t.onerror = () => rej(t.error); }); };
+    const out = fn(st); t.oncomplete = () => res(out instanceof IDBRequest ? out.result : out); t.onerror = () => rej(t.error); }); };
   return {
     all: () => tx("readonly", st => st.getAll()),
+    get: id => tx("readonly", st => st.get(id)),
     put: m => tx("readwrite", st => st.put(m)),
     del: id => tx("readwrite", st => st.delete(id)),
   };
@@ -347,6 +348,19 @@ async function importeer() {
   await render();
 }
 
+async function zetPad(id, src, path) {
+  const nu = await DB.get(id); if (!nu) return;
+  const f = nu.fotos.find(x => !x.path && x.src === src); if (f) { f.path = path; await DB.put(nu); }
+}
+/* alle rijen ophalen, ook boven de 1000 (Supabase geeft er standaard max. 1000 per keer) */
+async function haalAlles(maakQuery) {
+  const uit = [];
+  for (let a = 0; ; a += 1000) {
+    const { data, error } = await maakQuery().order("id").range(a, a + 999); if (error) throw error;
+    uit.push(...data); if (data.length < 1000) return uit;
+  }
+}
+
 async function sync() {
   if (!sb || !sessie || !navigator.onLine) { toonStatus(); return; }
   if (syncBezig) { syncNogmaals = true; return; }
@@ -367,6 +381,7 @@ async function sync() {
         const path = `${m.dag}/${m.id}/${Date.now()}-${i}.jpg`;
         const { error } = await sb.storage.from("fotos").upload(path, await blobVan(f.src), { contentType: "image/jpeg", upsert: true });
         if (error) throw error; f.path = path;
+        await zetPad(m.id, f.src, path);   // meteen bewaren: bij een latere fout niet nog eens uploaden
       }
       if (weg.length) { await sb.storage.from("fotos").remove(weg); }
       m.oudePaden = [];
@@ -376,11 +391,20 @@ async function sync() {
         fotos: m.fotos.map(f => ({ path: f.path, w: f.w, h: f.h })), updated_at: new Date(m.updated).toISOString() };
       if (m.user_id) rij.user_id = m.user_id;
       const { data, error } = await sb.from("meldingen").upsert(rij).select("user_id").single(); if (error) throw error;
-      m.user_id = data.user_id; m.dirty = false; m.synced = true; await DB.put(m);
+      // is de melding tijdens het uploaden op de telefoon gewijzigd of verwijderd? dan die versie houden
+      const nu = await DB.get(m.id);
+      if (!nu) { await DB.put({ ...m, user_id: data.user_id, deleted: true, dirty: true, synced: true, oudePaden: [] }); syncNogmaals = true; continue; }
+      if ((nu.updated || nu.ts) !== m.updated || !!nu.deleted !== !!m.deleted) {
+        nu.user_id ||= data.user_id; nu.synced = true;
+        nu.oudePaden = (nu.oudePaden || []).filter(p => !weg.includes(p));
+        for (const f of m.fotos) if (f.path && !nu.fotos.some(x => x.path === f.path)) nu.oudePaden.push(f.path);
+        await DB.put(nu); syncNogmaals = true; continue;
+      }
+      m.user_id = data.user_id; m.dirty = false; m.synced = true; m.fotos = nu.fotos.map(f => ({ ...f })); await DB.put(m);
     }
     // 2. meldingen van het team (laatste 60 dagen) omlaag
     const vanaf = dagKey(new Date(Date.now() - 60 * 864e5));
-    const { data, error } = await sb.from("meldingen").select("*").gte("dag", vanaf); if (error) throw error;
+    const data = await haalAlles(() => sb.from("meldingen").select("*").gte("dag", vanaf));
     const lokaal = new Map((await DB.all()).map(m => [m.id, m]));
     const ids = new Set();
     for (const r of data) {
@@ -513,7 +537,8 @@ for (const inp of [$("#fotoIn"), $("#fotoLib")]) inp.onchange = async () => {
 async function verklein(file, max = 1400) {
   let bron;
   try { bron = await createImageBitmap(file, { imageOrientation: "from-image" }); }
-  catch (e) { bron = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
+  catch (e) { const u = URL.createObjectURL(file);
+    try { bron = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; }); } finally { URL.revokeObjectURL(u); } }
   const w0 = bron.width, h0 = bron.height, k = Math.min(1, max / Math.max(w0, h0));
   const c = document.createElement("canvas"); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
   c.getContext("2d").drawImage(bron, 0, 0, c.width, c.height);
@@ -556,7 +581,12 @@ async function zoekAdres(lat, lon) {
 }
 $("#btnLoc").onclick = () => { $("#adres").value = ""; bepaalLocatie(); };
 
-$("#btnAnnuleer").onclick = () => { huidig = null; toon("lijst"); render(); };
+$("#btnAnnuleer").onclick = () => {
+  const nieuwMetInhoud = huidig && $("#formTitel").textContent === "Nieuwe melding" &&
+    (huidig.fotos.length || huidig.soorten.length || $("#tekst").value.trim() || $("#nummer").value.trim());
+  if (nieuwMetInhoud && !confirm("Deze melding is nog niet opgeslagen. Weggooien?")) return;
+  huidig = null; toon("lijst"); render();
+};
 $("#form").onsubmit = async e => {
   e.preventDefault();
   huidig.adres = $("#adres").value.trim(); huidig.tekst = $("#tekst").value.trim(); huidig.nummer = $("#nummer").value.trim();
@@ -565,6 +595,11 @@ $("#form").onsubmit = async e => {
   if (!huidig.adres) huidig.adres = (await zoekAdres(huidig.lat, huidig.lon)) || "";
   if (!huidig.melder) huidig.melder = mijnNaam();
   if (!huidig.user_id) huidig.user_id = mijnId();
+  const opg = await DB.get(huidig.id);   // kan intussen door de sync zijn bijgewerkt
+  if (opg) {
+    huidig.fotos.forEach(f => { if (!f.path) { const g = opg.fotos.find(x => x.path && x.src === f.src); if (g) f.path = g.path; } });
+    huidig.synced = huidig.synced || opg.synced; huidig.user_id ||= opg.user_id;
+  }
   huidig.updated = Date.now(); huidig.dirty = true;
   await DB.put(huidig); huidig = null;
   toast("Melding opgeslagen"); toon("lijst"); await render(); sync();
@@ -726,6 +761,7 @@ function toonAccount() {
   $("#opslagUitleg").textContent = sessie ? "Meldingen en foto's worden bewaard in de cloud en zijn zichtbaar voor iedereen in je team. Zonder internet blijven ze op de telefoon staan en gaan ze later automatisch omhoog."
     : "Alle meldingen en foto's staan alleen op deze telefoon. Log in om ze in de cloud te bewaren.";
   $("#btnUitloggen").textContent = "Uitloggen"; $("#btnUitloggen").dataset.zeker = "";
+  $("#btnOpruimen").textContent = `Verstuurde meldingen ouder dan ${sessie ? 60 : 30} dagen van deze telefoon halen`;
 }
 $("#btnNaarLogin").onclick = () => toon("login");
 $("#btnSyncNu").onclick = async () => { await sync(); toonAccount(); toast(syncFout ? "Synchroniseren mislukt: " + syncFout : "Gesynchroniseerd"); };
@@ -738,7 +774,7 @@ for (const [id, key] of [["sNaam", "naam"], ["sMail", "mail"], ["sOnderwerp", "o
   $("#" + id).oninput = e => { inst[key] = e.target.value.trim(); bewaarInst(); };
 $("#sSoorten").oninput = e => { const l = e.target.value.split("\n").map(s => s.trim()).filter(Boolean); inst.soorten = l.length ? l : STANDAARD_SOORTEN; bewaarInst(); };
 $("#btnOpruimen").onclick = async () => {
-  const grens = Date.now() - 30 * 864e5; let n = 0;
+  const grens = Date.now() - (sb && sessie ? 61 : 30) * 864e5; let n = 0;
   for (const m of alles) if (m.verstuurd && !m.dirty && m.ts < grens) { await DB.del(m.id); n++; }
   toast(n ? `${n} oude melding(en) opgeruimd` : "Niets op te ruimen"); render();
 };

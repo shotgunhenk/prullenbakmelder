@@ -175,7 +175,8 @@ const mapsUrl = (lat, lon) => `https://www.google.com/maps/search/?api=1&query=$
 const CFG = window.PB_CONFIG || {};
 const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true } });
 let sessie = null, rijen = [], gefilterd = [], gekozen = null, sorteer = { k: "ts", af: true };
-const fotoUrl = new Map(); // path -> signed url
+const fotoUrl = new Map(); // path -> { u: signed url, t: tijdstip } (links zijn 1 uur geldig)
+const URL_GELDIG = 50 * 60 * 1000;
 
 /* ---------- inloggen ---------- */
 async function start() {
@@ -203,23 +204,33 @@ function zetPeriode(dagen) {
 }
 document.querySelectorAll("[data-dagen]").forEach(b => b.onclick = () => { zetPeriode(+b.dataset.dagen); laad(); });
 for (const id of ["fVan", "fTot"]) $("#" + id).onchange = () => { document.querySelectorAll("[data-dagen]").forEach(b => b.setAttribute("aria-pressed", false)); laad(); };
-for (const id of ["fSoort", "fMelder", "fStatus"]) $("#" + id).onchange = toon;
-$("#fZoek").oninput = toon;
+for (const id of ["fSoort", "fMelder", "fStatus"]) $("#" + id).onchange = () => toon();
+$("#fZoek").oninput = () => toon();
 $("#verversen").onclick = () => laad();
 zetPeriode(6);
 
 /* ---------- data ---------- */
-let laadNr = 0;
-async function laad() {
+let laadNr = 0, laatsteVersie = "";
+/* stil = automatische verversing: niets doen als er niets veranderd is, en de kaart niet verschuiven */
+async function laad(stil = false) {
   if (!sessie) return;
   const nr = ++laadNr; $("#verversen").disabled = true;
-  const { data, error } = await sb.from("meldingen").select("*").gte("dag", $("#fVan").value).lte("dag", $("#fTot").value)
-    .order("ts", { ascending: false }).limit(3000);
+  const van = $("#fVan").value, tot = $("#fTot").value;
+  let data = [], error = null;
+  try {
+    for (let a = 0; ; a += 1000) {   // Supabase geeft max. 1000 rijen per keer
+      const r = await sb.from("meldingen").select("*").gte("dag", van).lte("dag", tot).order("id").range(a, a + 999);
+      if (r.error) throw r.error; data.push(...r.data); if (r.data.length < 1000) break;
+    }
+  } catch (e) { error = e; }
   $("#verversen").disabled = false;
   if (nr !== laadNr) return;
-  if (error) { $("#stats").innerHTML = `<span class="fout">Ophalen mislukt: ${esc(error.message)}</span>`; return; }
+  if (error) { if (!stil) $("#stats").innerHTML = `<span class="fout">Ophalen mislukt: ${esc(error.message || error)}</span>`; return; }
+  const versie = data.map(r => r.id + r.updated_at).sort().join("|");
+  if (stil && versie === laatsteVersie) return;
+  laatsteVersie = versie;
   rijen = data.map(r => ({ ...r, soorten: r.soorten || [], fotos: r.fotos || [] }));
-  vulKeuzes(); toon();
+  vulKeuzes(); toon(!stil);
 }
 function vulKeuzes() {
   const zet = (sel, waarden) => { const nu = sel.value, eerste = sel.options[0].outerHTML;
@@ -230,7 +241,7 @@ function vulKeuzes() {
 }
 
 /* ---------- tonen ---------- */
-function toon() {
+function toon(kaartPassen = true) {
   const soort = $("#fSoort").value, melder = $("#fMelder").value, status = $("#fStatus").value, q = $("#fZoek").value.trim().toLowerCase();
   gefilterd = rijen.filter(r => (!soort || r.soorten.includes(soort)) && (!melder || r.melder === melder)
     && (!status || (status === "verstuurd") === !!r.verstuurd)
@@ -259,24 +270,27 @@ function toon() {
   }
   $("#leeg").hidden = !!gefilterd.length;
   $("#leeg").textContent = rijen.length ? "Geen meldingen die bij deze filters passen." : "Geen meldingen in deze periode.";
-  laadThumbs(); tekenKaart();
+  laadThumbs(); tekenKaart(kaartPassen === true);
   if (gekozen && !gefilterd.some(r => r.id === gekozen)) { gekozen = null; $("#detail").hidden = true; }
   else if (gekozen) toonDetail();
 }
 document.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => {
-  sorteer = sorteer.k === th.dataset.k ? { k: th.dataset.k, af: !sorteer.af } : { k: th.dataset.k, af: th.dataset.k === "ts" }; toon(); });
+  sorteer = sorteer.k === th.dataset.k ? { k: th.dataset.k, af: !sorteer.af } : { k: th.dataset.k, af: th.dataset.k === "ts" }; toon(false); });
 
+const urlVan = p => { const x = fotoUrl.get(p); return x && Date.now() - x.t < URL_GELDIG ? x.u : null; };
 async function signUrls(paths) {
-  const nodig = [...new Set(paths)].filter(p => p && !fotoUrl.has(p)); if (!nodig.length) return;
+  const nodig = [...new Set(paths)].filter(p => p && !urlVan(p)); if (!nodig.length) return;
   for (let i = 0; i < nodig.length; i += 100) {
-    const { data } = await sb.storage.from("fotos").createSignedUrls(nodig.slice(i, i + 100), 3600);
-    (data || []).forEach(d => d.signedUrl && fotoUrl.set(d.path, d.signedUrl));
+    try {
+      const { data } = await sb.storage.from("fotos").createSignedUrls(nodig.slice(i, i + 100), 3600);
+      (data || []).forEach(d => d.signedUrl && fotoUrl.set(d.path, { u: d.signedUrl, t: Date.now() }));
+    } catch (e) { console.warn("foto-links niet opgehaald", e); }
   }
 }
 async function laadThumbs() {
   const imgs = [...document.querySelectorAll("img.thumb[data-path]")];
   await signUrls(imgs.slice(0, 300).map(i => i.dataset.path));
-  imgs.forEach(i => { const u = fotoUrl.get(i.dataset.path); if (u) i.src = u; });
+  imgs.forEach(i => { const u = urlVan(i.dataset.path); if (u) i.src = u; });
 }
 
 /* ---------- kaart ---------- */
@@ -289,7 +303,7 @@ function initKaart() {
   laag = L.featureGroup().addTo(kaart);
 }
 function kleur(r) { const css = getComputedStyle(document.documentElement); return css.getPropertyValue(r.verstuurd ? "--muted" : "--open").trim(); }
-function tekenKaart() {
+function tekenKaart(passen) {
   laag.clearLayers(); markers.clear();
   for (const r of gefilterd) {
     if (r.lat == null || r.lon == null) continue;
@@ -297,7 +311,7 @@ function tekenKaart() {
       .bindTooltip(`${esc(r.adres || "Onbekende plek")}<br>${esc(r.soorten.join(", "))}`).on("click", () => kies(r.id, false));
     m.addTo(laag); markers.set(r.id, m);
   }
-  if (!gekozen && markers.size) kaart.fitBounds(laag.getBounds(), { padding: [30, 30], maxZoom: 16 });
+  if (passen && !gekozen && markers.size) kaart.fitBounds(laag.getBounds(), { padding: [30, 30], maxZoom: 16 });
 }
 
 /* ---------- detail ---------- */
@@ -327,14 +341,14 @@ async function toonDetail() {
   $("#dStatus").onclick = () => zetVerstuurd(r, !r.verstuurd);
   await signUrls(r.fotos.map(f => f.path));
   if (gekozen !== r.id) return;
-  d.querySelectorAll("#dFotos a").forEach(a => { const u = fotoUrl.get(a.dataset.path); if (u) { a.href = u; a.querySelector("img").src = u; } });
+  d.querySelectorAll("#dFotos a").forEach(a => { const u = urlVan(a.dataset.path); if (u) { a.href = u; a.querySelector("img").src = u; } });
 }
 async function zetVerstuurd(r, waarde) {
   const b = $("#dStatus"); b.disabled = true;
   const nu = new Date().toISOString();
   const { error } = await sb.from("meldingen").update({ verstuurd: waarde, updated_at: nu }).eq("id", r.id);
   if (error) { b.disabled = false; alert("Opslaan mislukt: " + error.message); return; }
-  r.verstuurd = waarde; r.updated_at = nu; toon();
+  r.verstuurd = waarde; r.updated_at = nu; toon(false);
 }
 
 /* ---------- CSV ---------- */
@@ -348,7 +362,7 @@ $("#csv").onclick = () => {
   a.download = `meldingen-${$("#fVan").value}-tm-${$("#fTot").value}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 };
 
-setInterval(() => { if (sessie && document.visibilityState === "visible") laad(); }, 60000);
+setInterval(() => { if (sessie && document.visibilityState === "visible") laad(true); }, 60000);
 start();
 </script>
 </body>
