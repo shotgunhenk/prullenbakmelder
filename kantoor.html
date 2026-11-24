@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prullenbakmelder · Kantoor</title>
+<meta name="theme-color" content="#1f5f3f">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Kantoorweergave: overzicht van alle meldingen van het team, tabel + kaart */
+:root{
+  --bg:#f3f5f2; --card:#ffffff; --fg:#17231c; --muted:#5d6b62; --line:#d8dfd9;
+  --accent:#1f5f3f; --accent-fg:#ffffff; --accent-soft:#e1ede5; --hover:#f0f4f1;
+  --warn:#a33b20; --warn-soft:#f8e4dd; --ok:#2d7a4a; --open:#c2410c;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#101612; --card:#18211b; --fg:#e6ede8; --muted:#97a69c; --line:#2b372f;
+  --accent:#4fae7a; --accent-fg:#0b130e; --accent-soft:#1d3226; --hover:#1e2921;
+  --warn:#ef8a6b; --warn-soft:#3a201a; --ok:#6cc792; --open:#f59e5b; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font);display:flex;flex-direction:column}
+[hidden]{display:none!important}
+button,.btn{font:inherit;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;background:var(--accent-soft);color:var(--fg);font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+button.primary{background:var(--accent);color:var(--accent-fg)}
+button.ghost{background:transparent;color:var(--accent);padding:6px 8px}
+button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+input,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600;color:var(--muted)}
+
+header.top{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--card)}
+header.top h1{font-size:17px;margin:0;letter-spacing:-.01em}
+header.top .sp{flex:1}
+header.top .who{color:var(--muted);font-size:13px}
+
+.filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line)}
+.filters .snel{display:flex;gap:4px}
+.filters .zoek{flex:1 1 200px}
+.filters .zoek input{width:100%}
+
+.stats{display:flex;gap:18px;padding:10px 18px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+.stats b{color:var(--fg);font-size:15px;font-variant-numeric:tabular-nums}
+
+.werk{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,1fr);gap:0;border-top:1px solid var(--line)}
+.tabelbox{overflow:auto;min-height:0;background:var(--card)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{position:sticky;top:0;background:var(--card);font-size:12px;color:var(--muted);font-weight:600;z-index:1;cursor:pointer;user-select:none}
+th[data-k]:hover{color:var(--fg)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--hover)}
+tbody tr.sel{background:var(--accent-soft)}
+td .thumb{width:44px;height:44px;border-radius:6px;object-fit:cover;display:block;background:var(--bg)}
+td .adr{font-weight:600}
+td .sub{color:var(--muted);font-size:12px}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin:1px 3px 1px 0}
+.st{font-size:12px;font-weight:600;white-space:nowrap}
+.st.open{color:var(--open)} .st.ok{color:var(--muted)}
+.leeg{padding:40px 20px;text-align:center;color:var(--muted)}
+
+.rechts{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line)}
+#kaart{flex:1;min-height:240px;background:var(--bg)}
+.detail{max-height:55%;overflow:auto;border-top:1px solid var(--line);background:var(--card);padding:14px 16px}
+.detail h2{font-size:16px;margin:0 0 4px}
+.detail .meta{color:var(--muted);font-size:13px;margin-bottom:10px}
+.detail dl{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;margin:10px 0}
+.detail dt{color:var(--muted)} .detail dd{margin:0}
+.fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.fotos a{display:block;aspect-ratio:3/4;border-radius:8px;overflow:hidden;background:var(--bg)}
+.fotos img{width:100%;height:100%;object-fit:cover;display:block}
+.acties{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+.login{max-width:360px;margin:12vh auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:12px}
+.login h1{font-size:20px;margin:0}
+.login p{margin:0;color:var(--muted)}
+.login input{width:100%;padding:10px 12px}
+.fout{color:var(--warn);font-weight:600}
+.leaflet-container{font:inherit}
+
+@media (max-width:900px){
+  body{height:auto}
+  .werk{grid-template-columns:1fr}
+  .rechts{border-left:0;border-top:1px solid var(--line)}
+  #kaart{height:320px;flex:none}
+  .detail{max-height:none}
+  .tabelbox{max-height:60vh}
+  .col-hide{display:none}
+}
+@media (max-width:600px){
+  header.top{flex-wrap:wrap;padding:10px 16px;gap:8px}
+  header.top h1{flex:1 1 100%}
+  header.top .sp,header.top .who{display:none}
+  .filters,.stats{padding-left:16px;padding-right:16px}
+  th,td{padding:7px 6px}
+  td .thumb{width:36px;height:36px}
+}
+</style>
+</head>
+<body>
+
+<form class="login" id="login" hidden>
+  <h1>Prullenbakmelder · Kantoor</h1>
+  <p>Log in met je account van de Prullenbakmelder.</p>
+  <label class="f">E-mail<input type="email" id="lMail" autocomplete="username" required></label>
+  <label class="f">Wachtwoord<input type="password" id="lWw" autocomplete="current-password" required></label>
+  <div class="fout" id="lFout" hidden></div>
+  <button class="primary" type="submit" id="lKnop">Inloggen</button>
+</form>
+
+<div id="app" hidden style="display:contents">
+<header class="top">
+  <h1>Prullenbakmelder · Kantoor</h1>
+  <span class="sp"></span>
+  <span class="who" id="who"></span>
+  <a class="btn" href="./">Naar de app</a>
+  <button class="ghost" id="uit">Uitloggen</button>
+</header>
+
+<div class="filters">
+  <label class="f">Van<input type="date" id="fVan"></label>
+  <label class="f">Tot en met<input type="date" id="fTot"></label>
+  <div class="snel" role="group" aria-label="Snelle periode">
+    <button data-dagen="0">Vandaag</button><button data-dagen="6">7 dagen</button><button data-dagen="29">30 dagen</button>
+  </div>
+  <label class="f">Probleem<select id="fSoort"><option value="">Alle</option></select></label>
+  <label class="f">Melder<select id="fMelder"><option value="">Iedereen</option></select></label>
+  <label class="f">Status<select id="fStatus"><option value="">Alle</option><option value="open">Nog niet verstuurd</option><option value="verstuurd">Verstuurd</option></select></label>
+  <label class="f zoek">Zoeken<input type="search" id="fZoek" placeholder="Adres, toelichting, nummer…"></label>
+  <button id="verversen" title="Opnieuw ophalen">↻ Verversen</button>
+  <button id="csv">⬇ CSV</button>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<div class="werk">
+  <div class="tabelbox">
+    <table>
+      <thead><tr>
+        <th></th>
+        <th data-k="ts">Datum</th>
+        <th data-k="adres">Locatie</th>
+        <th data-k="soorten">Probleem</th>
+        <th data-k="melder" class="col-hide">Melder</th>
+        <th data-k="verstuurd">Status</th>
+      </tr></thead>
+      <tbody id="rijen"></tbody>
+    </table>
+    <div class="leeg" id="leeg" hidden></div>
+  </div>
+  <div class="rechts">
+    <div id="kaart" role="region" aria-label="Kaart met meldingen"></div>
+    <div class="detail" id="detail" hidden></div>
+  </div>
+</div>
+</div>
+
+<script src="config.js"></script>
+<script src="supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2, "0");
+const dagKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const tijd = ts => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const datumKort = ts => new Date(ts).toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" });
+const mapsUrl = (lat, lon) => `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+
+const CFG = window.PB_CONFIG || {};
+const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true } });
+let sessie = null, rijen = [], gefilterd = [], gekozen = null, sorteer = { k: "ts", af: true };
+const fotoUrl = new Map(); // path -> signed url
+
+/* ---------- inloggen ---------- */
+async function start() {
+  const { data } = await sb.auth.getSession(); sessie = data.session;
+  sb.auth.onAuthStateChange((_e, s) => { const was = !!sessie; sessie = s; if (!!s !== was) toonScherm(); });
+  toonScherm();
+}
+function toonScherm() {
+  $("#login").hidden = !!sessie; $("#app").hidden = !sessie;
+  if (sessie) { $("#who").textContent = sessie.user.email || ""; initKaart(); laad(); }
+}
+$("#login").onsubmit = async e => {
+  e.preventDefault(); const k = $("#lKnop"); k.disabled = true; $("#lFout").hidden = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("#lMail").value.trim(), password: $("#lWw").value });
+  k.disabled = false;
+  if (error) { $("#lFout").textContent = /invalid/i.test(error.message) ? "E-mail of wachtwoord klopt niet." : "Inloggen mislukt: " + error.message; $("#lFout").hidden = false; }
+};
+$("#uit").onclick = () => sb.auth.signOut();
+
+/* ---------- periode ---------- */
+function zetPeriode(dagen) {
+  const tot = new Date(), van = new Date(); van.setDate(van.getDate() - dagen);
+  $("#fVan").value = dagKey(van); $("#fTot").value = dagKey(tot);
+  document.querySelectorAll("[data-dagen]").forEach(b => b.setAttribute("aria-pressed", b.dataset.dagen == dagen));
+}
+document.querySelectorAll("[data-dagen]").forEach(b => b.onclick = () => { zetPeriode(+b.dataset.dagen); laad(); });
+for (const id of ["fVan", "fTot"]) $("#" + id).onchange = () => { document.querySelectorAll("[data-dagen]").forEach(b => b.setAttribute("aria-pressed", false)); laad(); };
+for (const id of ["fSoort", "fMelder", "fStatus"]) $("#" + id).onchange = toon;
+$("#fZoek").oninput = toon;
+$("#verversen").onclick = () => laad();
+zetPeriode(6);
+
+/* ---------- data ---------- */
+let laadNr = 0;
+async function laad() {
+  if (!sessie) return;
+  const nr = ++laadNr; $("#verversen").disabled = true;
+  const { data, error } = await sb.from("meldingen").select("*").gte("dag", $("#fVan").value).lte("dag", $("#fTot").value)
+    .order("ts", { ascending: false }).limit(3000);
+  $("#verversen").disabled = false;
+  if (nr !== laadNr) return;
+  if (error) { $("#stats").innerHTML = `<span class="fout">Ophalen mislukt: ${esc(error.message)}</span>`; return; }
+  rijen = data.map(r => ({ ...r, soorten: r.soorten || [], fotos: r.fotos || [] }));
+  vulKeuzes(); toon();
+}
+function vulKeuzes() {
+  const zet = (sel, waarden) => { const nu = sel.value, eerste = sel.options[0].outerHTML;
+    sel.innerHTML = eerste + [...waarden].sort((a, b) => a.localeCompare(b, "nl")).map(w => `<option>${esc(w)}</option>`).join("");
+    if ([...waarden].includes(nu)) sel.value = nu; };
+  zet($("#fSoort"), new Set(rijen.flatMap(r => r.soorten)));
+  zet($("#fMelder"), new Set(rijen.map(r => r.melder).filter(Boolean)));
+}
+
+/* ---------- tonen ---------- */
+function toon() {
+  const soort = $("#fSoort").value, melder = $("#fMelder").value, status = $("#fStatus").value, q = $("#fZoek").value.trim().toLowerCase();
+  gefilterd = rijen.filter(r => (!soort || r.soorten.includes(soort)) && (!melder || r.melder === melder)
+    && (!status || (status === "verstuurd") === !!r.verstuurd)
+    && (!q || [r.adres, r.tekst, r.nummer, r.melder, ...r.soorten].join(" ").toLowerCase().includes(q)));
+  const { k, af } = sorteer, w = r => k === "soorten" ? r.soorten.join(",") : k === "ts" ? Date.parse(r.ts) : k === "verstuurd" ? +!!r.verstuurd : String(r[k] || "").toLowerCase();
+  gefilterd.sort((a, b) => { const x = w(a), y = w(b); return (x < y ? -1 : x > y ? 1 : 0) * (af ? -1 : 1); });
+  document.querySelectorAll("th[data-k]").forEach(th => th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === k ? (af ? " ▼" : " ▲") : ""));
+
+  const open = gefilterd.filter(r => !r.verstuurd).length, plekken = new Set(gefilterd.map(r => r.adres).filter(Boolean)).size;
+  const tel = {}; gefilterd.forEach(r => r.soorten.forEach(s => tel[s] = (tel[s] || 0) + 1));
+  const top = Object.entries(tel).sort((a, b) => b[1] - a[1])[0];
+  $("#stats").innerHTML = `<span><b>${gefilterd.length}</b> meldingen</span><span><b>${open}</b> nog niet verstuurd</span><span><b>${plekken}</b> locaties</span>` +
+    (top ? `<span>Meest gemeld: <b>${esc(top[0])}</b> (${top[1]}×)</span>` : "") + (gefilterd.length < rijen.length ? `<span>${rijen.length - gefilterd.length} weggefilterd</span>` : "");
+
+  const tb = $("#rijen"); tb.innerHTML = "";
+  for (const r of gefilterd) {
+    const tr = document.createElement("tr"); tr.dataset.id = r.id; if (gekozen === r.id) tr.className = "sel";
+    tr.innerHTML = `<td>${r.fotos[0] ? `<img class="thumb" alt="" data-path="${esc(r.fotos[0].path)}">` : ""}</td>
+      <td><div>${esc(datumKort(r.ts))}</div><div class="sub">${tijd(r.ts)}</div></td>
+      <td><div class="adr">${esc(r.adres || "Onbekende plek")}</div><div class="sub">${esc([r.nummer && "bak " + r.nummer, r.tekst].filter(Boolean).join(" · "))}</div></td>
+      <td>${r.soorten.map(s => `<span class="tag">${esc(s)}</span>`).join("")}</td>
+      <td class="col-hide">${esc(r.melder)}</td>
+      <td>${r.verstuurd ? `<span class="st ok">Verstuurd</span>` : `<span class="st open">Open</span>`}</td>`;
+    tr.onclick = () => kies(r.id, true);
+    tb.append(tr);
+  }
+  $("#leeg").hidden = !!gefilterd.length;
+  $("#leeg").textContent = rijen.length ? "Geen meldingen die bij deze filters passen." : "Geen meldingen in deze periode.";
+  laadThumbs(); tekenKaart();
+  if (gekozen && !gefilterd.some(r => r.id === gekozen)) { gekozen = null; $("#detail").hidden = true; }
+  else if (gekozen) toonDetail();
+}
+document.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => {
+  sorteer = sorteer.k === th.dataset.k ? { k: th.dataset.k, af: !sorteer.af } : { k: th.dataset.k, af: th.dataset.k === "ts" }; toon(); });
+
+async function signUrls(paths) {
+  const nodig = [...new Set(paths)].filter(p => p && !fotoUrl.has(p)); if (!nodig.length) return;
+  for (let i = 0; i < nodig.length; i += 100) {
+    const { data } = await sb.storage.from("fotos").createSignedUrls(nodig.slice(i, i + 100), 3600);
+    (data || []).forEach(d => d.signedUrl && fotoUrl.set(d.path, d.signedUrl));
+  }
+}
+async function laadThumbs() {
+  const imgs = [...document.querySelectorAll("img.thumb[data-path]")];
+  await signUrls(imgs.slice(0, 300).map(i => i.dataset.path));
+  imgs.forEach(i => { const u = fotoUrl.get(i.dataset.path); if (u) i.src = u; });
+}
+
+/* ---------- kaart ---------- */
+let kaart, laag, markers = new Map();
+function initKaart() {
+  if (kaart) return;
+  kaart = L.map("kaart", { zoomControl: true }).setView([52.2, 5.3], 7);
+  L.tileLayer("https://service.pdok.nl/brt/achtergrondkaart/wmts/v2_0/standaard/EPSG:3857/{z}/{x}/{y}.png",
+    { maxZoom: 19, maxNativeZoom: 19, attribution: 'Kaart: <a href="https://www.pdok.nl">PDOK</a> / Kadaster' }).addTo(kaart);
+  laag = L.featureGroup().addTo(kaart);
+}
+function kleur(r) { const css = getComputedStyle(document.documentElement); return css.getPropertyValue(r.verstuurd ? "--muted" : "--open").trim(); }
+function tekenKaart() {
+  laag.clearLayers(); markers.clear();
+  for (const r of gefilterd) {
+    if (r.lat == null || r.lon == null) continue;
+    const m = L.circleMarker([r.lat, r.lon], { radius: gekozen === r.id ? 10 : 7, weight: 2, color: "#fff", fillColor: kleur(r), fillOpacity: .95 })
+      .bindTooltip(`${esc(r.adres || "Onbekende plek")}<br>${esc(r.soorten.join(", "))}`).on("click", () => kies(r.id, false));
+    m.addTo(laag); markers.set(r.id, m);
+  }
+  if (!gekozen && markers.size) kaart.fitBounds(laag.getBounds(), { padding: [30, 30], maxZoom: 16 });
+}
+
+/* ---------- detail ---------- */
+function kies(id, centreer) {
+  gekozen = id;
+  document.querySelectorAll("#rijen tr").forEach(tr => tr.classList.toggle("sel", tr.dataset.id === id));
+  markers.forEach((m, mid) => m.setRadius(mid === id ? 10 : 7));
+  const m = markers.get(id); if (m) { m.bringToFront(); if (centreer) kaart.setView(m.getLatLng(), Math.max(kaart.getZoom(), 16)); }
+  if (!centreer) document.querySelector(`#rijen tr[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
+  toonDetail();
+}
+async function toonDetail() {
+  const r = rijen.find(x => x.id === gekozen); const d = $("#detail"); if (!r) { d.hidden = true; return; }
+  d.hidden = false;
+  const heeftLoc = r.lat != null && r.lon != null;
+  d.innerHTML = `<h2>${esc(r.adres || "Onbekende plek")}</h2>
+    <div class="meta">${esc(new Date(r.ts).toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}, ${tijd(r.ts)} uur${r.melder ? " · " + esc(r.melder) : ""}</div>
+    <div>${r.soorten.map(s => `<span class="tag">${esc(s)}</span>`).join("")}</div>
+    <dl>${r.tekst ? `<dt>Toelichting</dt><dd>${esc(r.tekst)}</dd>` : ""}${r.nummer ? `<dt>Nummer bak</dt><dd>${esc(r.nummer)}</dd>` : ""}
+      <dt>Locatie</dt><dd>${heeftLoc ? `${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}${r.acc ? ` (± ${Math.round(r.acc)} m)` : ""}` : "Geen GPS-locatie"}</dd>
+      <dt>Status</dt><dd>${r.verstuurd ? "Verstuurd naar de gemeente" : "Nog niet verstuurd"}</dd></dl>
+    <div class="fotos" id="dFotos">${r.fotos.map(f => `<a target="_blank" rel="noopener" data-path="${esc(f.path)}"><img alt="Foto van de melding"></a>`).join("")}</div>
+    <div class="acties">
+      ${heeftLoc ? `<a class="btn" target="_blank" rel="noopener" href="${mapsUrl(r.lat, r.lon)}">Open in Google Maps</a>` : ""}
+      <button id="dStatus">${r.verstuurd ? "Markeer als niet verstuurd" : "Markeer als verstuurd"}</button>
+    </div>`;
+  $("#dStatus").onclick = () => zetVerstuurd(r, !r.verstuurd);
+  await signUrls(r.fotos.map(f => f.path));
+  if (gekozen !== r.id) return;
+  d.querySelectorAll("#dFotos a").forEach(a => { const u = fotoUrl.get(a.dataset.path); if (u) { a.href = u; a.querySelector("img").src = u; } });
+}
+async function zetVerstuurd(r, waarde) {
+  const b = $("#dStatus"); b.disabled = true;
+  const nu = new Date().toISOString();
+  const { error } = await sb.from("meldingen").update({ verstuurd: waarde, updated_at: nu }).eq("id", r.id);
+  if (error) { b.disabled = false; alert("Opslaan mislukt: " + error.message); return; }
+  r.verstuurd = waarde; r.updated_at = nu; toon();
+}
+
+/* ---------- CSV ---------- */
+$("#csv").onclick = () => {
+  const kol = ["Datum", "Tijd", "Locatie", "Probleem", "Toelichting", "Nummer bak", "Melder", "Status", "Breedtegraad", "Lengtegraad", "Google Maps"];
+  const c = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const regels = gefilterd.map(r => [r.dag, tijd(r.ts), r.adres, r.soorten.join(", "), r.tekst, r.nummer, r.melder, r.verstuurd ? "Verstuurd" : "Open",
+    r.lat ?? "", r.lon ?? "", r.lat != null ? mapsUrl(r.lat, r.lon) : ""].map(c).join(";"));
+  const blob = new Blob(["﻿" + [kol.join(";"), ...regels].join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `meldingen-${$("#fVan").value}-tm-${$("#fTot").value}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+};
+
+setInterval(() => { if (sessie && document.visibilityState === "visible") laad(); }, 60000);
+start();
+</script>
+</body>
+</html>
