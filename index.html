@@ -77,6 +77,12 @@ textarea{min-height:84px;resize:vertical}
 .big{font-size:40px;font-weight:700;line-height:1}
 .daypick{display:flex;gap:10px;align-items:end}
 .daypick>div{flex:1}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);background:none;border:0;padding:2px 0;min-height:0;font-weight:500;text-align:left}
+.status.warn{color:var(--warn)}
+.status.ok{color:var(--ok)}
+.check{display:flex;gap:10px;align-items:center;font-weight:500;color:var(--fg)}
+.check input{width:22px;height:22px}
+.fout{color:var(--warn);font-size:14px}
 </style>
 </head>
 <body>
@@ -85,7 +91,8 @@ textarea{min-height:84px;resize:vertical}
 <!-- ===== LIJST ===== -->
 <section class="view" id="v-lijst">
   <header>
-    <div><h1>Prullenbakmelder</h1><div class="sub" id="vandaagTxt"></div></div>
+    <div><h1>Prullenbakmelder</h1><div class="sub" id="vandaagTxt"></div>
+      <button class="status" id="syncStatus" hidden></button></div>
     <button class="ghost" id="btnInst" aria-label="Instellingen">Instellingen</button>
   </header>
 
@@ -166,6 +173,7 @@ textarea{min-height:84px;resize:vertical}
       <div class="daypick">
         <div><label for="rapDatum">Dag</label><input type="date" id="rapDatum"></div>
       </div>
+      <label class="check" id="alleenMijnRij" hidden><input type="checkbox" id="alleenMijn"> Alleen mijn eigen meldingen</label>
       <div class="note" id="rapInfo"></div>
       <button class="primary" id="btnMaakPdf">PDF maken</button>
     </div>
@@ -185,14 +193,37 @@ textarea{min-height:84px;resize:vertical}
     <h1>Instellingen</h1>
     <button class="ghost" data-terug>Klaar</button>
   </header>
+  <div class="card stack" id="accountKaart" hidden>
+    <div><b>Account (cloud-opslag)</b><div class="note" id="accountTxt"></div></div>
+    <div class="row">
+      <button id="btnNaarLogin">Inloggen</button>
+      <button id="btnSyncNu">Nu synchroniseren</button>
+      <button class="danger" id="btnUitloggen">Uitloggen</button>
+    </div>
+  </div>
   <div class="card stack">
     <div><label for="sNaam">Jouw naam (komt op de PDF)</label><input type="text" id="sNaam"></div>
     <div><label for="sMail">E-mailadres gemeente / ontvanger</label><input type="email" id="sMail" placeholder="bv. meldingen@gemeente.nl"></div>
     <div><label for="sOnderwerp">Onderwerp mail</label><input type="text" id="sOnderwerp"></div>
     <div><label for="sSoorten">Soorten klachten (één per regel)</label><textarea id="sSoorten" style="min-height:160px"></textarea></div>
   </div>
-  <p class="note">Alle meldingen en foto's staan alleen op deze telefoon. Verwijder de app niet van je beginscherm zolang er nog meldingen in staan die niet verstuurd zijn.</p>
-  <button class="danger" id="btnOpruimen">Verstuurde meldingen ouder dan 30 dagen opruimen</button>
+  <p class="note" id="opslagUitleg">Alle meldingen en foto's staan alleen op deze telefoon. Verwijder de app niet van je beginscherm zolang er nog meldingen in staan die niet verstuurd zijn.</p>
+  <button class="danger" id="btnOpruimen">Verstuurde meldingen ouder dan 30 dagen van deze telefoon halen</button>
+</section>
+
+<!-- ===== INLOGGEN ===== -->
+<section class="view" id="v-login" hidden>
+  <header>
+    <h1>Inloggen</h1>
+    <button class="ghost" id="btnLoginLater">Later</button>
+  </header>
+  <form class="card stack" id="loginForm">
+    <p class="note" style="margin:0">Log in om je meldingen en foto's veilig in de cloud te bewaren en te delen met je team. Zonder inloggen blijven ze alleen op deze telefoon.</p>
+    <div><label for="lMail">E-mailadres</label><input type="email" id="lMail" autocomplete="username" required></div>
+    <div><label for="lWw">Wachtwoord</label><input type="password" id="lWw" autocomplete="current-password" required style="width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)"></div>
+    <div class="fout" id="loginFout" hidden></div>
+    <button type="submit" class="primary" id="btnLogin">Inloggen</button>
+  </form>
 </section>
 
 </main>
@@ -205,6 +236,8 @@ textarea{min-height:84px;resize:vertical}
 </nav>
 
 <script src="jspdf.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="supabase.js"></script>
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
@@ -255,10 +288,117 @@ function toon(v) {
 }
 document.querySelectorAll("[data-terug]").forEach(b => b.onclick = () => { toon("lijst"); render(); });
 
+/* ---------- cloud (Supabase) ---------- */
+const CFG = window.PB_CONFIG || {};
+const sb = (CFG.supabaseUrl && CFG.supabaseKey && window.supabase)
+  ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true } }) : null;
+let sessie = null, syncBezig = false, syncNogmaals = false, syncFout = "", laatsteSync = 0;
+const mijnId = () => sessie?.user?.id || null;
+const isMijn = m => !m.user_id || m.user_id === mijnId();
+
+async function initAuth() {
+  if (!sb) return;
+  try { const { data } = await sb.auth.getSession(); sessie = data.session; } catch (e) {}
+  sb.auth.onAuthStateChange((_e, s) => { sessie = s; toonStatus(); });
+}
+function toonStatus() {
+  const el = $("#syncStatus"); if (!sb) { el.hidden = true; return; }
+  el.hidden = false; el.className = "status";
+  const wacht = alles.filter(m => m.dirty).length;
+  if (!sessie) { el.textContent = "⚠︎ Niet ingelogd: meldingen staan alleen op deze telefoon"; el.classList.add("warn"); }
+  else if (syncBezig) el.textContent = "↻ Bezig met opslaan in de cloud…";
+  else if (!navigator.onLine) el.textContent = wacht ? `⏸ Geen internet: ${wacht} melding(en) wachten op upload` : "⏸ Geen internet";
+  else if (syncFout) { el.textContent = `⚠︎ Upload mislukt (${wacht} wachten). Tik om opnieuw te proberen`; el.classList.add("warn"); }
+  else if (wacht) el.textContent = `↻ ${wacht} melding(en) wachten op upload`;
+  else { el.textContent = `✓ Alles opgeslagen in de cloud${laatsteSync ? " · " + tijd(laatsteSync) : ""}`; el.classList.add("ok"); }
+}
+$("#syncStatus").onclick = () => sessie ? sync() : toon("login");
+
+async function blobVan(src) { return (await fetch(src)).blob(); }
+function naarDataUrl(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); }); }
+
+async function sync() {
+  if (!sb || !sessie || !navigator.onLine) { toonStatus(); return; }
+  if (syncBezig) { syncNogmaals = true; return; }
+  syncBezig = true; syncFout = ""; toonStatus();
+  try {
+    // 1. eigen wijzigingen omhoog
+    for (const m of (await DB.all()).filter(x => x.dirty)) {
+      const weg = (m.oudePaden || []).slice();
+      if (m.deleted) {
+        weg.push(...m.fotos.filter(f => f.path).map(f => f.path));
+        if (weg.length) await sb.storage.from("fotos").remove(weg);
+        const { error } = await sb.from("meldingen").delete().eq("id", m.id); if (error) throw error;
+        await DB.del(m.id); continue;
+      }
+      for (let i = 0; i < m.fotos.length; i++) {
+        const f = m.fotos[i]; if (f.path || !f.src) continue;
+        const path = `${m.dag}/${m.id}/${Date.now()}-${i}.jpg`;
+        const { error } = await sb.storage.from("fotos").upload(path, await blobVan(f.src), { contentType: "image/jpeg", upsert: true });
+        if (error) throw error; f.path = path;
+      }
+      if (weg.length) { await sb.storage.from("fotos").remove(weg); }
+      m.oudePaden = [];
+      if (!m.updated) m.updated = m.ts;
+      const rij = { id: m.id, melder: m.melder || "", ts: new Date(m.ts).toISOString(), dag: m.dag, soorten: m.soorten, tekst: m.tekst,
+        nummer: m.nummer, adres: m.adres, lat: m.lat, lon: m.lon, acc: m.acc, verstuurd: !!m.verstuurd,
+        fotos: m.fotos.map(f => ({ path: f.path, w: f.w, h: f.h })), updated_at: new Date(m.updated).toISOString() };
+      if (m.user_id) rij.user_id = m.user_id;
+      const { data, error } = await sb.from("meldingen").upsert(rij).select("user_id").single(); if (error) throw error;
+      m.user_id = data.user_id; m.dirty = false; m.synced = true; await DB.put(m);
+    }
+    // 2. meldingen van het team (laatste 60 dagen) omlaag
+    const vanaf = dagKey(new Date(Date.now() - 60 * 864e5));
+    const { data, error } = await sb.from("meldingen").select("*").gte("dag", vanaf); if (error) throw error;
+    const lokaal = new Map((await DB.all()).map(m => [m.id, m]));
+    const ids = new Set();
+    for (const r of data) {
+      ids.add(r.id);
+      const l = lokaal.get(r.id), ru = Date.parse(r.updated_at);
+      if (l && (l.dirty || (l.updated || 0) >= ru)) continue;
+      const bekend = new Map((l?.fotos || []).filter(f => f.path && f.src).map(f => [f.path, f.src]));
+      await DB.put({ id: r.id, ts: Date.parse(r.ts), dag: r.dag, soorten: r.soorten || [], tekst: r.tekst || "", nummer: r.nummer || "",
+        adres: r.adres || "", lat: r.lat, lon: r.lon, acc: r.acc, melder: r.melder || "", user_id: r.user_id, verstuurd: r.verstuurd,
+        fotos: (r.fotos || []).map(f => ({ ...f, src: bekend.get(f.path) })), updated: ru, dirty: false, synced: true });
+    }
+    for (const l of lokaal.values())   // door iemand anders verwijderd
+      if (l.synced && !l.dirty && l.dag >= vanaf && !ids.has(l.id)) await DB.del(l.id);
+    laatsteSync = Date.now();
+  } catch (e) { console.error(e); syncFout = e.message || String(e); }
+  syncBezig = false;
+  await render();
+  if (syncNogmaals) { syncNogmaals = false; sync(); }
+}
+
+/* foto's van collega's ophalen wanneer nodig (en lokaal bewaren) */
+async function laadFotos(m) {
+  let veranderd = false;
+  for (const f of m.fotos) {
+    if (f.src || !f.path || !sb || !sessie) continue;
+    try { const { data, error } = await sb.storage.from("fotos").download(f.path); if (error) throw error; f.src = await naarDataUrl(data); veranderd = true; }
+    catch (e) { console.warn("foto niet geladen", f.path, e); }
+  }
+  if (veranderd) { const vers = (await DB.all()).find(x => x.id === m.id); if (vers) { vers.fotos.forEach(v => { const g = m.fotos.find(x => x.path && x.path === v.path); if (g?.src) v.src = g.src; }); await DB.put(vers); } }
+  return veranderd;
+}
+
+/* inloggen */
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault(); if (!sb) return;
+  const b = $("#btnLogin"), fout = $("#loginFout"); b.disabled = true; b.textContent = "Bezig…"; fout.hidden = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("#lMail").value.trim(), password: $("#lWw").value });
+  b.disabled = false; b.textContent = "Inloggen";
+  if (error) { fout.textContent = /invalid/i.test(error.message) ? "E-mailadres of wachtwoord klopt niet." : "Inloggen lukt niet: " + error.message; fout.hidden = false; return; }
+  const { data } = await sb.auth.getSession(); sessie = data.session;
+  $("#lWw").value = ""; toast("Ingelogd"); toon("lijst"); await render(); sync();
+};
+$("#btnLoginLater").onclick = () => { toon("lijst"); render(); };
+
 /* ---------- lijst ---------- */
 let alles = [];
 async function render() {
-  alles = (await DB.all()).sort((a, b) => b.ts - a.ts);
+  alles = (await DB.all()).filter(m => !m.deleted).sort((a, b) => b.ts - a.ts);
+  toonStatus();
   const vandaag = dagKey(new Date());
   $("#vandaagTxt").textContent = dagLang(vandaag);
   const vd = alles.filter(m => m.dag === vandaag);
@@ -280,10 +420,12 @@ async function render() {
 function itemEl(m) {
   const el = document.createElement("button");
   el.type = "button"; el.className = "card item"; el.style.textAlign = "left"; el.style.fontWeight = "400";
-  el.innerHTML = `${m.fotos[0] ? `<img alt="" src="${m.fotos[0].src}">` : `<img alt="">`}
+  const f0 = m.fotos[0];
+  el.innerHTML = `${f0?.src ? `<img alt="" src="${f0.src}">` : `<img alt="">`}
     <div style="min-width:0"><div class="t">${esc(m.adres || "Onbekende plek")}</div>
-    <div class="m">${tijd(m.ts)}${m.nummer ? " · bak " + esc(m.nummer) : ""}${m.tekst ? " · " + esc(m.tekst) : ""}</div>
-    <div>${m.soorten.map(s => `<span class="tag">${esc(s)}</span>`).join("")}${m.verstuurd ? `<span class="tag sent">verstuurd</span>` : ""}</div></div>`;
+    <div class="m">${tijd(m.ts)}${!isMijn(m) && m.melder ? " · " + esc(m.melder) : ""}${m.nummer ? " · bak " + esc(m.nummer) : ""}${m.tekst ? " · " + esc(m.tekst) : ""}</div>
+    <div>${m.soorten.map(s => `<span class="tag">${esc(s)}</span>`).join("")}${m.verstuurd ? `<span class="tag sent">verstuurd</span>` : ""}${sb && m.dirty ? `<span class="tag sent">nog niet in cloud</span>` : ""}</div></div>`;
+  if (f0 && !f0.src && f0.path) laadFotos({ id: m.id, fotos: [f0] }).then(() => { if (f0.src) el.querySelector("img").src = f0.src; });
   el.onclick = () => openForm(m);
   return el;
 }
@@ -293,8 +435,10 @@ let huidig = null;
 function nieuweMelding() {
   const nu = new Date();
   return { id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(), ts: nu.getTime(), dag: dagKey(nu),
-    fotos: [], soorten: [], tekst: "", nummer: "", adres: "", lat: null, lon: null, acc: null, verstuurd: false };
+    fotos: [], soorten: [], tekst: "", nummer: "", adres: "", lat: null, lon: null, acc: null, verstuurd: false,
+    user_id: mijnId(), melder: "", dirty: true, updated: nu.getTime() };
 }
+const mijnNaam = () => inst.naam || (sessie?.user?.email || "").split("@")[0];
 function openForm(m) {
   const nieuw = !m;
   huidig = nieuw ? nieuweMelding() : structuredClone(m);
@@ -304,13 +448,14 @@ function openForm(m) {
   renderFotos(); renderSoorten(); toonLoc();
   toon("form");
   if (nieuw) { bepaalLocatie(); }
+  else if (huidig.fotos.some(f => !f.src)) { const h = huidig; laadFotos(h).then(v => { if (v && h === huidig) renderFotos(); }); }
 }
 function renderFotos() {
   const box = $("#fotos"); box.innerHTML = "";
   huidig.fotos.forEach((f, i) => {
     const d = document.createElement("div"); d.className = "ph";
-    d.innerHTML = `<img alt="Foto ${i + 1}" src="${f.src}"><button type="button" class="x" aria-label="Foto verwijderen">×</button>`;
-    d.querySelector(".x").onclick = () => { huidig.fotos.splice(i, 1); renderFotos(); };
+    d.innerHTML = `<img alt="Foto ${i + 1}" ${f.src ? `src="${f.src}"` : ""}><button type="button" class="x" aria-label="Foto verwijderen">×</button>`;
+    d.querySelector(".x").onclick = () => { const [weg] = huidig.fotos.splice(i, 1); if (weg?.path) (huidig.oudePaden ||= []).push(weg.path); renderFotos(); };
     box.append(d);
   });
   box.hidden = !huidig.fotos.length;
@@ -387,13 +532,20 @@ $("#form").onsubmit = async e => {
   if (!huidig.fotos.length && !huidig.tekst && !huidig.soorten.length) { toast("Maak een foto of vul in wat er is"); return; }
   if (!huidig.adres && huidig.lat == null) { toast("Wacht op de locatie of typ een adres"); return; }
   if (!huidig.adres) huidig.adres = (await zoekAdres(huidig.lat, huidig.lon)) || "";
+  if (!huidig.melder) huidig.melder = mijnNaam();
+  if (!huidig.user_id) huidig.user_id = mijnId();
+  huidig.updated = Date.now(); huidig.dirty = true;
   await DB.put(huidig); huidig = null;
-  toast("Melding opgeslagen"); toon("lijst"); render();
+  toast("Melding opgeslagen"); toon("lijst"); await render(); sync();
 };
 $("#btnVerwijder").onclick = async () => {
   const b = $("#btnVerwijder");
   if (b.dataset.zeker !== "1") { b.dataset.zeker = "1"; b.textContent = "Echt verwijderen?"; setTimeout(() => { b.dataset.zeker = ""; b.textContent = "Verwijderen"; }, 3000); return; }
-  b.dataset.zeker = ""; await DB.del(huidig.id); huidig = null; toast("Verwijderd"); toon("lijst"); render();
+  b.dataset.zeker = "";
+  const opgeslagen = (await DB.all()).find(x => x.id === huidig.id);
+  if (sb && opgeslagen?.synced) { opgeslagen.deleted = true; opgeslagen.dirty = true; opgeslagen.oudePaden = [...(opgeslagen.oudePaden || []), ...(huidig.oudePaden || [])]; await DB.put(opgeslagen); }
+  else await DB.del(huidig.id);
+  huidig = null; toast("Verwijderd"); toon("lijst"); await render(); sync();
 };
 $("#btnNieuw").onclick = () => openForm(null);
 
@@ -401,9 +553,13 @@ $("#btnNieuw").onclick = () => openForm(null);
 let pdfBestand = null;
 $("#btnRapport").onclick = () => { $("#rapDatum").value = dagKey(new Date()); rapInfo(); toon("rapport"); };
 $("#rapDatum").onchange = rapInfo;
+$("#alleenMijn").onchange = rapInfo;
+const rapLijst = () => { const d = $("#rapDatum").value;
+  return alles.filter(m => m.dag === d && (!$("#alleenMijn").checked || isMijn(m))).sort((a, z) => a.ts - z.ts); };
 function rapInfo() {
   pdfBestand = null; $("#pdfKlaar").hidden = true;
-  const d = $("#rapDatum").value; const n = alles.filter(m => m.dag === d);
+  $("#alleenMijnRij").hidden = !alles.some(m => !isMijn(m));
+  const d = $("#rapDatum").value; const n = rapLijst();
   $("#rapInfo").textContent = n.length ? `${n.length} melding(en) op ${dagLang(d)}${n.some(m => m.verstuurd) ? " (deels al verstuurd)" : ""}.` : "Geen meldingen op deze dag.";
   $("#btnMaakPdf").disabled = !n.length;
 }
@@ -411,7 +567,8 @@ $("#btnMaakPdf").onclick = async () => {
   const b = $("#btnMaakPdf"); b.disabled = true; b.textContent = "PDF wordt gemaakt…";
   try {
     const d = $("#rapDatum").value;
-    const lijst = alles.filter(m => m.dag === d).sort((a, z) => a.ts - z.ts);
+    const lijst = rapLijst();
+    for (const m of lijst) if (m.fotos.some(f => !f.src)) await laadFotos(m);
     const blob = maakPdf(d, lijst);
     const naam = `meldingen-prullenbakken-${d}.pdf`;
     pdfBestand = { blob, naam, d, ids: lijst.map(m => m.id) };
@@ -438,7 +595,8 @@ function maakPdf(dag, lijst) {
   doc.text(`${lijst.length} melding${lijst.length === 1 ? "" : "en"}`, W - M, 22, { align: "right" });
   let y = 38;
   doc.setTextColor(0); doc.setFontSize(10);
-  if (inst.naam) { doc.setTextColor(...grijs); doc.text(`Gemeld door: ${inst.naam}`, M, y); y += 6; }
+  const melders = [...new Set(lijst.map(m => m.melder || inst.naam).filter(Boolean))];
+  if (melders.length) { doc.setTextColor(...grijs); const r = doc.splitTextToSize(`Gemeld door: ${melders.join(", ")}`, CW); doc.text(r, M, y); y += r.length * 4.6 + 1.5; }
   // overzicht
   doc.setTextColor(0); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text("Overzicht", M, y); y += 5;
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
@@ -455,7 +613,7 @@ function maakPdf(dag, lijst) {
     doc.setTextColor(0); doc.setFontSize(14);
     const kop = doc.splitTextToSize(m.adres || "Onbekende plek", CW - 12); doc.text(kop, M + 11, y); y += kop.length * 6 + 1;
     doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...grijs);
-    doc.text(`${dagLang(m.dag)}, ${tijd(m.ts)} uur${m.nummer ? "   ·   Nummer bak: " + m.nummer : ""}`, M + 11, y); y += 7;
+    doc.text(`${dagLang(m.dag)}, ${tijd(m.ts)} uur${m.nummer ? "   ·   Nummer bak: " + m.nummer : ""}${melders.length > 1 && m.melder ? "   ·   " + m.melder : ""}`, M + 11, y); y += 7;
     doc.setTextColor(0);
     const veld = (label, waarde, link) => {
       doc.setFont("helvetica", "bold"); doc.text(label, M, y);
@@ -471,15 +629,16 @@ function maakPdf(dag, lijst) {
     if (m.lat != null) veld("Kaart", "Open in Google Maps", mapsUrl(m.lat, m.lon));
     y += 3;
     // foto's
-    const n = m.fotos.length; if (!n) return;
+    const fotos = m.fotos.filter(f => f.src);
+    const n = fotos.length; if (!n) return;
     const ruimte = H - M - y;
     if (n === 1) {
-      const f = m.fotos[0]; const k = Math.min(CW / f.w, ruimte / f.h);
+      const f = fotos[0]; const k = Math.min(CW / f.w, ruimte / f.h);
       doc.addImage(f.src, "JPEG", M + (CW - f.w * k) / 2, y, f.w * k, f.h * k, undefined, "FAST");
     } else {
       const kol = 2, gap = 4, cw = (CW - gap) / kol;
       const rijen = Math.ceil(n / kol), rh = (ruimte - gap * (rijen - 1)) / rijen;
-      m.fotos.forEach((f, j) => {
+      fotos.forEach((f, j) => {
         const k = Math.min(cw / f.w, rh / f.h);
         const x0 = M + (j % kol) * (cw + gap), y0 = y + Math.floor(j / kol) * (rh + gap);
         doc.addImage(f.src, "JPEG", x0 + (cw - f.w * k) / 2, y0, f.w * k, f.h * k, undefined, "FAST");
@@ -494,7 +653,9 @@ function maakPdf(dag, lijst) {
 
 async function markeerVerstuurd() {
   if (!pdfBestand) return;
-  for (const id of pdfBestand.ids) { const m = alles.find(x => x.id === id); if (m && !m.verstuurd) { m.verstuurd = true; await DB.put(m); } }
+  for (const id of pdfBestand.ids) { const m = (await DB.all()).find(x => x.id === id);
+    if (m && !m.verstuurd) { m.verstuurd = true; m.updated = Date.now(); m.dirty = true; await DB.put(m); } }
+  await render(); sync();
 }
 $("#btnDeel").onclick = async () => {
   if (!pdfBestand) return;
@@ -524,19 +685,41 @@ $("#btnKopieer").onclick = async () => { try { await navigator.clipboard.writeTe
 /* ---------- instellingen ---------- */
 $("#btnInst").onclick = () => {
   $("#sNaam").value = inst.naam; $("#sMail").value = inst.mail; $("#sOnderwerp").value = inst.onderwerp; $("#sSoorten").value = inst.soorten.join("\n");
-  toon("inst");
+  toonAccount(); toon("inst");
+};
+function toonAccount() {
+  $("#accountKaart").hidden = !sb; if (!sb) return;
+  const wacht = alles.filter(m => m.dirty).length;
+  $("#accountTxt").textContent = sessie ? `Ingelogd als ${sessie.user.email}.${wacht ? ` ${wacht} melding(en) wachten op upload.` : " Alles staat in de cloud."}` : "Niet ingelogd. Meldingen staan alleen op deze telefoon.";
+  $("#btnNaarLogin").hidden = !!sessie; $("#btnSyncNu").hidden = !sessie; $("#btnUitloggen").hidden = !sessie;
+  $("#opslagUitleg").textContent = sessie ? "Meldingen en foto's worden bewaard in de cloud en zijn zichtbaar voor iedereen in je team. Zonder internet blijven ze op de telefoon staan en gaan ze later automatisch omhoog."
+    : "Alle meldingen en foto's staan alleen op deze telefoon. Log in om ze in de cloud te bewaren.";
+  $("#btnUitloggen").textContent = "Uitloggen"; $("#btnUitloggen").dataset.zeker = "";
+}
+$("#btnNaarLogin").onclick = () => toon("login");
+$("#btnSyncNu").onclick = async () => { await sync(); toonAccount(); toast(syncFout ? "Synchroniseren mislukt: " + syncFout : "Gesynchroniseerd"); };
+$("#btnUitloggen").onclick = async () => {
+  const b = $("#btnUitloggen"), wacht = alles.filter(m => m.dirty).length;
+  if (b.dataset.zeker !== "1") { b.dataset.zeker = "1"; b.textContent = wacht ? `${wacht} niet geüpload! Toch uitloggen?` : "Echt uitloggen?"; return; }
+  await sb.auth.signOut(); sessie = null; toonAccount(); toonStatus(); toast("Uitgelogd");
 };
 for (const [id, key] of [["sNaam", "naam"], ["sMail", "mail"], ["sOnderwerp", "onderwerp"]])
   $("#" + id).oninput = e => { inst[key] = e.target.value.trim(); bewaarInst(); };
 $("#sSoorten").oninput = e => { const l = e.target.value.split("\n").map(s => s.trim()).filter(Boolean); inst.soorten = l.length ? l : STANDAARD_SOORTEN; bewaarInst(); };
 $("#btnOpruimen").onclick = async () => {
   const grens = Date.now() - 30 * 864e5; let n = 0;
-  for (const m of alles) if (m.verstuurd && m.ts < grens) { await DB.del(m.id); n++; }
+  for (const m of alles) if (m.verstuurd && !m.dirty && m.ts < grens) { await DB.del(m.id); n++; }
   toast(n ? `${n} oude melding(en) opgeruimd` : "Niets op te ruimen"); render();
 };
 
 /* ---------- start ---------- */
-toon("lijst"); render();
+(async () => {
+  toon("lijst"); await initAuth(); await render();
+  if (sb && !sessie) toon("login"); else sync();
+})();
+window.addEventListener("online", sync);
+window.addEventListener("offline", toonStatus);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") sync(); });
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
