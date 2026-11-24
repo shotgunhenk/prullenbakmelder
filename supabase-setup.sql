@@ -23,6 +23,7 @@ create index if not exists meldingen_dag_idx on public.meldingen (dag);
 
 -- 2. Alleen ingelogde gebruikers (het team) mogen lezen en schrijven
 alter table public.meldingen enable row level security;
+grant select, insert, update, delete on public.meldingen to authenticated;
 drop policy if exists "team leest" on public.meldingen;
 drop policy if exists "team voegt toe" on public.meldingen;
 drop policy if exists "team wijzigt" on public.meldingen;
