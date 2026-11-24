@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Prullenbakmelder</title>
+<meta name="theme-color" content="#1f5f3f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Prullenbak">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<style>
+/* Werkapp voor buiten: grote knoppen, één kolom, groen van de gemeentelijke bak */
+:root{
+  --bg:#f3f5f2; --card:#ffffff; --fg:#17231c; --muted:#5d6b62; --line:#d8dfd9;
+  --accent:#1f5f3f; --accent-fg:#ffffff; --accent-soft:#e1ede5;
+  --warn:#a33b20; --warn-soft:#f8e4dd; --ok:#2d7a4a;
+  --radius:14px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#101612; --card:#18211b; --fg:#e6ede8; --muted:#97a69c; --line:#2b372f;
+  --accent:#4fae7a; --accent-fg:#0b130e; --accent-soft:#1d3226;
+  --warn:#ef8a6b; --warn-soft:#3a201a; --ok:#6cc792; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--font);-webkit-text-size-adjust:100%;
+  padding:env(safe-area-inset-top) max(16px,env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+main{max-width:640px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0 10px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h2{font-size:17px;margin:22px 0 10px}
+.sub{color:var(--muted);font-size:14px}
+button,.btn{font:inherit;border:0;border-radius:12px;padding:12px 16px;cursor:pointer;background:var(--accent-soft);color:var(--fg);font-weight:600;min-height:46px}
+button.primary{background:var(--accent);color:var(--accent-fg)}
+button.danger{background:var(--warn-soft);color:var(--warn)}
+button.ghost{background:transparent;color:var(--accent);padding:8px 10px;min-height:0}
+button:disabled{opacity:.5}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1 1 auto}
+label{font-size:14px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px}
+input[type=text],input[type=email],input[type=date],textarea,select{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg)}
+textarea{min-height:84px;resize:vertical}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:8px 13px;font-weight:500;min-height:40px}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.photos .ph{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--bg)}
+.photos img{width:100%;height:100%;object-fit:cover;display:block}
+.photos .x{position:absolute;top:4px;right:4px;width:30px;height:30px;min-height:0;padding:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:30px}
+.camera{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:120px;border:2px dashed var(--accent);background:var(--accent-soft);color:var(--accent);font-size:18px;border-radius:var(--radius)}
+.loc{display:flex;gap:10px;align-items:flex-start}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--muted);margin-top:7px;flex:none}
+.dot.ok{background:var(--ok)} .dot.busy{background:#d9a400;animation:p 1s infinite} .dot.err{background:var(--warn)}
+@keyframes p{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.dot.busy{animation:none}}
+.item{display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:start}
+.item img{width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--bg)}
+.item .t{font-weight:600}
+.item .m{color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin:2px 4px 0 0}
+.tag.sent{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.empty{text-align:center;color:var(--muted);padding:28px 10px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  padding:10px max(16px,env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));z-index:5}
+.bar .in{max-width:640px;margin:0 auto;display:flex;gap:10px}
+.bar button{flex:1;white-space:nowrap}
+.bar button.primary{flex:1.6}
+.view[hidden]{display:none!important}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:15px;z-index:9;max-width:90vw;text-align:center}
+.note{font-size:14px;color:var(--muted)}
+.big{font-size:40px;font-weight:700;line-height:1}
+.daypick{display:flex;gap:10px;align-items:end}
+.daypick>div{flex:1}
+</style>
+</head>
+<body>
+<main>
+
+<!-- ===== LIJST ===== -->
+<section class="view" id="v-lijst">
+  <header>
+    <div><h1>Prullenbakmelder</h1><div class="sub" id="vandaagTxt"></div></div>
+    <button class="ghost" id="btnInst" aria-label="Instellingen">Instellingen</button>
+  </header>
+
+  <div class="card row" style="align-items:center">
+    <div style="flex:0 0 auto"><div class="big" id="telVandaag">0</div></div>
+    <div class="note" style="flex:1 1 200px">meldingen vandaag. Aan het eind van de dag: <b>Dagrapport</b> → PDF maken → versturen met Mail.</div>
+  </div>
+
+  <h2>Vandaag</h2>
+  <div class="stack" id="lijst"></div>
+
+  <details style="margin-top:22px">
+    <summary class="note" style="cursor:pointer">Eerdere dagen</summary>
+    <div class="stack" id="eerder" style="margin-top:10px"></div>
+  </details>
+</section>
+
+<!-- ===== NIEUW / BEWERKEN ===== -->
+<section class="view" id="v-form" hidden>
+  <header>
+    <h1 id="formTitel">Nieuwe melding</h1>
+    <button class="ghost" id="btnAnnuleer">Annuleren</button>
+  </header>
+  <form class="stack" id="form" autocomplete="off">
+    <div class="card stack">
+      <input type="file" id="fotoIn" accept="image/*" capture="environment" hidden>
+      <input type="file" id="fotoLib" accept="image/*" multiple hidden>
+      <div class="photos" id="fotos"></div>
+      <button type="button" class="camera" id="btnFoto">📷 Foto maken</button>
+      <button type="button" class="ghost" id="btnLib" style="align-self:flex-start">Of kies uit fotobibliotheek</button>
+    </div>
+
+    <div class="card stack">
+      <div class="loc">
+        <span class="dot" id="locDot"></span>
+        <div style="flex:1;min-width:0">
+          <div id="locTxt">Locatie nog niet bepaald</div>
+          <div class="note" id="locSub"></div>
+        </div>
+        <button type="button" class="ghost" id="btnLoc">Opnieuw</button>
+      </div>
+      <div>
+        <label for="adres">Adres / plek (aan te passen)</label>
+        <input type="text" id="adres" placeholder="bv. Beatrixstraat 99, Emmen – bij bushalte">
+      </div>
+    </div>
+
+    <div class="card stack">
+      <div>
+        <label>Wat is er aan de hand?</label>
+        <div class="chips" id="soorten"></div>
+      </div>
+      <div>
+        <label for="tekst">Toelichting</label>
+        <textarea id="tekst" placeholder="Wat zie je? Bijv. deksel afgebroken, bak puilt uit, zakken ernaast."></textarea>
+      </div>
+      <div>
+        <label for="nummer">Nummer op de bak (als die er is)</label>
+        <input type="text" id="nummer" inputmode="text" placeholder="optioneel">
+      </div>
+    </div>
+
+    <div class="row">
+      <button type="button" class="danger" id="btnVerwijder" hidden style="flex:0 0 auto">Verwijderen</button>
+      <button type="submit" class="primary" id="btnOpslaan">Melding opslaan</button>
+    </div>
+  </form>
+</section>
+
+<!-- ===== DAGRAPPORT ===== -->
+<section class="view" id="v-rapport" hidden>
+  <header>
+    <h1>Dagrapport</h1>
+    <button class="ghost" data-terug>Terug</button>
+  </header>
+  <div class="stack">
+    <div class="card stack">
+      <div class="daypick">
+        <div><label for="rapDatum">Dag</label><input type="date" id="rapDatum"></div>
+      </div>
+      <div class="note" id="rapInfo"></div>
+      <button class="primary" id="btnMaakPdf">PDF maken</button>
+    </div>
+    <div class="card stack" id="pdfKlaar" hidden>
+      <div><b id="pdfNaam"></b><div class="note" id="pdfGrootte"></div></div>
+      <button class="primary" id="btnDeel">Versturen via Mail…</button>
+      <button id="btnDownload">PDF opslaan / bekijken</button>
+      <div class="note" id="mailHint"></div>
+      <button class="ghost" id="btnKopieer" style="align-self:flex-start" hidden>E-mailadres kopiëren</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===== INSTELLINGEN ===== -->
+<section class="view" id="v-inst" hidden>
+  <header>
+    <h1>Instellingen</h1>
+    <button class="ghost" data-terug>Klaar</button>
+  </header>
+  <div class="card stack">
+    <div><label for="sNaam">Jouw naam (komt op de PDF)</label><input type="text" id="sNaam"></div>
+    <div><label for="sMail">E-mailadres gemeente / ontvanger</label><input type="email" id="sMail" placeholder="bv. meldingen@gemeente.nl"></div>
+    <div><label for="sOnderwerp">Onderwerp mail</label><input type="text" id="sOnderwerp"></div>
+    <div><label for="sSoorten">Soorten klachten (één per regel)</label><textarea id="sSoorten" style="min-height:160px"></textarea></div>
+  </div>
+  <p class="note">Alle meldingen en foto's staan alleen op deze telefoon. Verwijder de app niet van je beginscherm zolang er nog meldingen in staan die niet verstuurd zijn.</p>
+  <button class="danger" id="btnOpruimen">Verstuurde meldingen ouder dan 30 dagen opruimen</button>
+</section>
+
+</main>
+
+<nav class="bar" id="bar">
+  <div class="in">
+    <button id="btnRapport">Dagrapport</button>
+    <button class="primary" id="btnNieuw">+ Nieuwe melding</button>
+  </div>
+</nav>
+
+<script src="jspdf.umd.min.js"></script>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const STANDAARD_SOORTEN = ["Vol / puilt uit","Afval naast de bak","Kapot / beschadigd","Deksel of klep stuk","Bak ontbreekt","Scheef / losgeraakt","Brandschade","Graffiti / beplakt","Stank / ongedierte","Anders"];
+
+/* ---------- opslag (IndexedDB) ---------- */
+const DB = (() => {
+  let dbp;
+  const open = () => dbp ||= new Promise((res, rej) => {
+    const r = indexedDB.open("prullenbak", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("meldingen", { keyPath: "id" });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  const tx = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => {
+    const t = db.transaction("meldingen", mode); const st = t.objectStore("meldingen");
+    const out = fn(st); t.oncomplete = () => res(out && out.result !== undefined ? out.result : out); t.onerror = () => rej(t.error); }); };
+  return {
+    all: () => tx("readonly", st => st.getAll()),
+    put: m => tx("readwrite", st => st.put(m)),
+    del: id => tx("readwrite", st => st.delete(id)),
+  };
+})();
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+
+const inst = (() => {
+  let s = {}; try { s = JSON.parse(localStorage.getItem("inst") || "{}"); } catch (e) {}
+  return Object.assign({ naam: "", mail: "", onderwerp: "Meldingen prullenbakken", soorten: STANDAARD_SOORTEN }, s);
+})();
+const bewaarInst = () => { try { localStorage.setItem("inst", JSON.stringify(inst)); } catch (e) {} };
+
+/* ---------- hulpjes ---------- */
+const pad = n => String(n).padStart(2, "0");
+const dagKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const tijd = ts => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const dagLang = key => { const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const mapsUrl = (lat, lon) => `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+let toastT;
+function toast(msg) { let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.append(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); }
+
+/* ---------- schermen ---------- */
+function toon(v) {
+  document.querySelectorAll(".view").forEach(s => s.hidden = s.id !== "v-" + v);
+  $("#bar").hidden = v !== "lijst";
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("[data-terug]").forEach(b => b.onclick = () => { toon("lijst"); render(); });
+
+/* ---------- lijst ---------- */
+let alles = [];
+async function render() {
+  alles = (await DB.all()).sort((a, b) => b.ts - a.ts);
+  const vandaag = dagKey(new Date());
+  $("#vandaagTxt").textContent = dagLang(vandaag);
+  const vd = alles.filter(m => m.dag === vandaag);
+  $("#telVandaag").textContent = vd.length;
+  $("#lijst").innerHTML = vd.length ? "" : `<div class="card empty">Nog geen meldingen vandaag.<br>Tik op <b>+ Nieuwe melding</b> en maak een foto van de bak.</div>`;
+  vd.forEach(m => $("#lijst").append(itemEl(m)));
+
+  const eerder = alles.filter(m => m.dag !== vandaag);
+  const perDag = {}; eerder.forEach(m => (perDag[m.dag] ||= []).push(m));
+  const box = $("#eerder"); box.innerHTML = "";
+  if (!eerder.length) box.innerHTML = `<div class="note">Geen eerdere meldingen.</div>`;
+  Object.keys(perDag).sort().reverse().forEach(d => {
+    const h = document.createElement("div"); h.className = "note"; h.style.fontWeight = "600";
+    const open = perDag[d].filter(m => !m.verstuurd).length;
+    h.textContent = `${dagLang(d)} · ${perDag[d].length} melding(en)${open ? ` · ${open} niet verstuurd` : ""}`;
+    box.append(h); perDag[d].forEach(m => box.append(itemEl(m)));
+  });
+}
+function itemEl(m) {
+  const el = document.createElement("button");
+  el.type = "button"; el.className = "card item"; el.style.textAlign = "left"; el.style.fontWeight = "400";
+  el.innerHTML = `${m.fotos[0] ? `<img alt="" src="${m.fotos[0].src}">` : `<img alt="">`}
+    <div style="min-width:0"><div class="t">${esc(m.adres || "Onbekende plek")}</div>
+    <div class="m">${tijd(m.ts)}${m.nummer ? " · bak " + esc(m.nummer) : ""}${m.tekst ? " · " + esc(m.tekst) : ""}</div>
+    <div>${m.soorten.map(s => `<span class="tag">${esc(s)}</span>`).join("")}${m.verstuurd ? `<span class="tag sent">verstuurd</span>` : ""}</div></div>`;
+  el.onclick = () => openForm(m);
+  return el;
+}
+
+/* ---------- formulier ---------- */
+let huidig = null;
+function nieuweMelding() {
+  const nu = new Date();
+  return { id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(), ts: nu.getTime(), dag: dagKey(nu),
+    fotos: [], soorten: [], tekst: "", nummer: "", adres: "", lat: null, lon: null, acc: null, verstuurd: false };
+}
+function openForm(m) {
+  const nieuw = !m;
+  huidig = nieuw ? nieuweMelding() : structuredClone(m);
+  $("#formTitel").textContent = nieuw ? "Nieuwe melding" : "Melding bewerken";
+  $("#btnVerwijder").hidden = nieuw; $("#btnVerwijder").textContent = "Verwijderen";
+  $("#adres").value = huidig.adres; $("#tekst").value = huidig.tekst; $("#nummer").value = huidig.nummer;
+  renderFotos(); renderSoorten(); toonLoc();
+  toon("form");
+  if (nieuw) { bepaalLocatie(); }
+}
+function renderFotos() {
+  const box = $("#fotos"); box.innerHTML = "";
+  huidig.fotos.forEach((f, i) => {
+    const d = document.createElement("div"); d.className = "ph";
+    d.innerHTML = `<img alt="Foto ${i + 1}" src="${f.src}"><button type="button" class="x" aria-label="Foto verwijderen">×</button>`;
+    d.querySelector(".x").onclick = () => { huidig.fotos.splice(i, 1); renderFotos(); };
+    box.append(d);
+  });
+  box.hidden = !huidig.fotos.length;
+  $("#btnFoto").textContent = huidig.fotos.length ? "📷 Nog een foto" : "📷 Foto maken";
+  $("#btnFoto").style.minHeight = huidig.fotos.length ? "56px" : "120px";
+}
+function renderSoorten() {
+  const box = $("#soorten"); box.innerHTML = "";
+  const lijst = [...new Set([...inst.soorten, ...huidig.soorten])];
+  lijst.forEach(s => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = s;
+    b.setAttribute("aria-pressed", huidig.soorten.includes(s));
+    b.onclick = () => { const i = huidig.soorten.indexOf(s); i < 0 ? huidig.soorten.push(s) : huidig.soorten.splice(i, 1); b.setAttribute("aria-pressed", i < 0); };
+    box.append(b);
+  });
+}
+$("#btnFoto").onclick = () => $("#fotoIn").click();
+$("#btnLib").onclick = () => $("#fotoLib").click();
+for (const inp of [$("#fotoIn"), $("#fotoLib")]) inp.onchange = async () => {
+  const files = [...inp.files]; inp.value = "";
+  for (const f of files) { try { huidig.fotos.push(await verklein(f)); } catch (e) { toast("Foto kon niet gelezen worden"); } }
+  renderFotos();
+};
+async function verklein(file, max = 1400) {
+  let bron;
+  try { bron = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch (e) { bron = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
+  const w0 = bron.width, h0 = bron.height, k = Math.min(1, max / Math.max(w0, h0));
+  const c = document.createElement("canvas"); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+  c.getContext("2d").drawImage(bron, 0, 0, c.width, c.height);
+  return { src: c.toDataURL("image/jpeg", 0.72), w: c.width, h: c.height };
+}
+
+/* locatie */
+let locBezig = false;
+function toonLoc(status) {
+  const dot = $("#locDot"); dot.className = "dot " + (status || (huidig.lat != null ? "ok" : ""));
+  if (status === "busy") { $("#locTxt").textContent = "Locatie bepalen…"; $("#locSub").textContent = ""; return; }
+  if (huidig.lat != null) {
+    $("#locTxt").innerHTML = `<a href="${mapsUrl(huidig.lat, huidig.lon)}" target="_blank" rel="noopener">${huidig.lat.toFixed(5)}, ${huidig.lon.toFixed(5)}</a>`;
+    $("#locSub").textContent = huidig.acc ? `nauwkeurig tot ± ${Math.round(huidig.acc)} m` : "";
+  } else if (status !== "err") { $("#locTxt").textContent = "Locatie nog niet bepaald"; $("#locSub").textContent = ""; }
+}
+function bepaalLocatie() {
+  if (!("geolocation" in navigator)) { $("#locTxt").textContent = "Deze telefoon geeft geen locatie door"; toonLoc("err"); return; }
+  if (locBezig) return; locBezig = true; toonLoc("busy");
+  const voor = huidig;
+  navigator.geolocation.getCurrentPosition(async p => {
+    locBezig = false; if (voor !== huidig) return;
+    huidig.lat = p.coords.latitude; huidig.lon = p.coords.longitude; huidig.acc = p.coords.accuracy; toonLoc();
+    const adr = await zoekAdres(huidig.lat, huidig.lon);
+    if (adr && voor === huidig && !$("#adres").value.trim()) { $("#adres").value = adr; }
+  }, err => {
+    locBezig = false; if (voor !== huidig) return;
+    $("#locTxt").textContent = err.code === 1 ? "Geen toestemming voor locatie" : "Locatie niet gevonden";
+    $("#locSub").textContent = err.code === 1 ? "Zet in Instellingen › Privacy › Locatievoorzieningen de locatie aan voor Safari, of typ het adres hieronder." : "Tik op Opnieuw, of typ het adres hieronder.";
+    toonLoc("err");
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 });
+}
+async function zoekAdres(lat, lon) {
+  try {
+    const r = await fetch(`https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse?lat=${lat}&lon=${lon}&rows=1&type=adres`);
+    const j = await r.json(); const d = j.response.docs[0];
+    if (!d) return "";
+    return d.afstand > 60 ? `nabij ${d.weergavenaam}` : d.weergavenaam;
+  } catch (e) { return ""; }
+}
+$("#btnLoc").onclick = () => { $("#adres").value = ""; bepaalLocatie(); };
+
+$("#btnAnnuleer").onclick = () => { huidig = null; toon("lijst"); render(); };
+$("#form").onsubmit = async e => {
+  e.preventDefault();
+  huidig.adres = $("#adres").value.trim(); huidig.tekst = $("#tekst").value.trim(); huidig.nummer = $("#nummer").value.trim();
+  if (!huidig.fotos.length && !huidig.tekst && !huidig.soorten.length) { toast("Maak een foto of vul in wat er is"); return; }
+  if (!huidig.adres && huidig.lat == null) { toast("Wacht op de locatie of typ een adres"); return; }
+  if (!huidig.adres) huidig.adres = (await zoekAdres(huidig.lat, huidig.lon)) || "";
+  await DB.put(huidig); huidig = null;
+  toast("Melding opgeslagen"); toon("lijst"); render();
+};
+$("#btnVerwijder").onclick = async () => {
+  const b = $("#btnVerwijder");
+  if (b.dataset.zeker !== "1") { b.dataset.zeker = "1"; b.textContent = "Echt verwijderen?"; setTimeout(() => { b.dataset.zeker = ""; b.textContent = "Verwijderen"; }, 3000); return; }
+  b.dataset.zeker = ""; await DB.del(huidig.id); huidig = null; toast("Verwijderd"); toon("lijst"); render();
+};
+$("#btnNieuw").onclick = () => openForm(null);
+
+/* ---------- dagrapport ---------- */
+let pdfBestand = null;
+$("#btnRapport").onclick = () => { $("#rapDatum").value = dagKey(new Date()); rapInfo(); toon("rapport"); };
+$("#rapDatum").onchange = rapInfo;
+function rapInfo() {
+  pdfBestand = null; $("#pdfKlaar").hidden = true;
+  const d = $("#rapDatum").value; const n = alles.filter(m => m.dag === d);
+  $("#rapInfo").textContent = n.length ? `${n.length} melding(en) op ${dagLang(d)}${n.some(m => m.verstuurd) ? " (deels al verstuurd)" : ""}.` : "Geen meldingen op deze dag.";
+  $("#btnMaakPdf").disabled = !n.length;
+}
+$("#btnMaakPdf").onclick = async () => {
+  const b = $("#btnMaakPdf"); b.disabled = true; b.textContent = "PDF wordt gemaakt…";
+  try {
+    const d = $("#rapDatum").value;
+    const lijst = alles.filter(m => m.dag === d).sort((a, z) => a.ts - z.ts);
+    const blob = maakPdf(d, lijst);
+    const naam = `meldingen-prullenbakken-${d}.pdf`;
+    pdfBestand = { blob, naam, d, ids: lijst.map(m => m.id) };
+    $("#pdfNaam").textContent = naam;
+    $("#pdfGrootte").textContent = `${lijst.length} melding(en) · ${blob.size < 1048576 ? Math.ceil(blob.size / 1024) + " kB" : (blob.size / 1048576).toFixed(1) + " MB"}`;
+    $("#mailHint").textContent = inst.mail ? `Kies Mail en vul als ontvanger in: ${inst.mail}` : "Tip: zet het e-mailadres van de gemeente bij Instellingen.";
+    $("#btnKopieer").hidden = !inst.mail;
+    $("#pdfKlaar").hidden = false;
+  } catch (e) { console.error(e); toast("PDF maken mislukt: " + e.message); }
+  b.disabled = false; b.textContent = "PDF opnieuw maken";
+};
+
+function maakPdf(dag, lijst) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const W = 210, H = 297, M = 15, CW = W - 2 * M;
+  const groen = [31, 95, 63], grijs = [93, 107, 98];
+  // kop
+  doc.setFillColor(...groen); doc.rect(0, 0, W, 30, "F");
+  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+  doc.text("Meldingen prullenbakken", M, 14);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+  const dl = dagLang(dag); doc.text(dl.charAt(0).toUpperCase() + dl.slice(1), M, 22);
+  doc.text(`${lijst.length} melding${lijst.length === 1 ? "" : "en"}`, W - M, 22, { align: "right" });
+  let y = 38;
+  doc.setTextColor(0); doc.setFontSize(10);
+  if (inst.naam) { doc.setTextColor(...grijs); doc.text(`Gemeld door: ${inst.naam}`, M, y); y += 6; }
+  // overzicht
+  doc.setTextColor(0); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text("Overzicht", M, y); y += 5;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+  lijst.forEach((m, i) => {
+    if (y > H - 20) { doc.addPage(); y = 20; }
+    const r = `${i + 1}.  ${tijd(m.ts)}  ${m.adres || "onbekende plek"}${m.soorten.length ? " — " + m.soorten.join(", ") : ""}`;
+    const regels = doc.splitTextToSize(r, CW); doc.text(regels, M, y); y += regels.length * 4.4 + 1;
+  });
+  // per melding
+  lijst.forEach((m, i) => {
+    doc.addPage(); y = 18;
+    doc.setFillColor(...groen); doc.circle(M + 4, y - 1.5, 4, "F");
+    doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text(String(i + 1), M + 4, y, { align: "center" });
+    doc.setTextColor(0); doc.setFontSize(14);
+    const kop = doc.splitTextToSize(m.adres || "Onbekende plek", CW - 12); doc.text(kop, M + 11, y); y += kop.length * 6 + 1;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...grijs);
+    doc.text(`${dagLang(m.dag)}, ${tijd(m.ts)} uur${m.nummer ? "   ·   Nummer bak: " + m.nummer : ""}`, M + 11, y); y += 7;
+    doc.setTextColor(0);
+    const veld = (label, waarde, link) => {
+      doc.setFont("helvetica", "bold"); doc.text(label, M, y);
+      doc.setFont("helvetica", "normal");
+      const regels = doc.splitTextToSize(waarde, CW - 32);
+      if (link) { doc.setTextColor(20, 90, 180); doc.textWithLink(regels[0], M + 32, y, { url: link }); doc.setTextColor(0); }
+      else doc.text(regels, M + 32, y);
+      y += Math.max(1, regels.length) * 4.8 + 1.5;
+    };
+    if (m.soorten.length) veld("Probleem", m.soorten.join(", "));
+    if (m.tekst) veld("Toelichting", m.tekst);
+    if (m.lat != null) veld("Coördinaten", `${m.lat.toFixed(6)}, ${m.lon.toFixed(6)}${m.acc ? `  (± ${Math.round(m.acc)} m)` : ""}`);
+    if (m.lat != null) veld("Kaart", "Open in Google Maps", mapsUrl(m.lat, m.lon));
+    y += 3;
+    // foto's
+    const n = m.fotos.length; if (!n) return;
+    const ruimte = H - M - y;
+    if (n === 1) {
+      const f = m.fotos[0]; const k = Math.min(CW / f.w, ruimte / f.h);
+      doc.addImage(f.src, "JPEG", M + (CW - f.w * k) / 2, y, f.w * k, f.h * k, undefined, "FAST");
+    } else {
+      const kol = 2, gap = 4, cw = (CW - gap) / kol;
+      const rijen = Math.ceil(n / kol), rh = (ruimte - gap * (rijen - 1)) / rijen;
+      m.fotos.forEach((f, j) => {
+        const k = Math.min(cw / f.w, rh / f.h);
+        const x0 = M + (j % kol) * (cw + gap), y0 = y + Math.floor(j / kol) * (rh + gap);
+        doc.addImage(f.src, "JPEG", x0 + (cw - f.w * k) / 2, y0, f.w * k, f.h * k, undefined, "FAST");
+      });
+    }
+  });
+  const tot = doc.getNumberOfPages();
+  for (let p = 1; p <= tot; p++) { doc.setPage(p); doc.setFontSize(8); doc.setTextColor(...grijs);
+    doc.text(`Pagina ${p} van ${tot}`, W - M, H - 8, { align: "right" }); }
+  return doc.output("blob");
+}
+
+async function markeerVerstuurd() {
+  if (!pdfBestand) return;
+  for (const id of pdfBestand.ids) { const m = alles.find(x => x.id === id); if (m && !m.verstuurd) { m.verstuurd = true; await DB.put(m); } }
+}
+$("#btnDeel").onclick = async () => {
+  if (!pdfBestand) return;
+  const file = new File([pdfBestand.blob], pdfBestand.naam, { type: "application/pdf" });
+  const tekst = `Beste,\n\nIn de bijlage de meldingen van prullenbakken van ${dagLang(pdfBestand.d)}.\n\nMet vriendelijke groet,\n${inst.naam || ""}`;
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: `${inst.onderwerp} ${pdfBestand.d}`, text: tekst });
+      await markeerVerstuurd(); toast("Gedeeld. Meldingen gemarkeerd als verstuurd.");
+    } catch (e) { if (e.name !== "AbortError") toast("Delen lukte niet: " + e.message); }
+  } else {
+    download();
+    const mailto = `mailto:${encodeURIComponent(inst.mail || "")}?subject=${encodeURIComponent(`${inst.onderwerp} ${pdfBestand.d}`)}&body=${encodeURIComponent(tekst + "\n\n(PDF als bijlage toevoegen)")}`;
+    location.href = mailto;
+    toast("PDF is opgeslagen. Voeg hem als bijlage toe in de mail.");
+    await markeerVerstuurd();
+  }
+};
+function download() {
+  const url = URL.createObjectURL(pdfBestand.blob);
+  const a = document.createElement("a"); a.href = url; a.download = pdfBestand.naam; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+$("#btnDownload").onclick = () => pdfBestand && download();
+$("#btnKopieer").onclick = async () => { try { await navigator.clipboard.writeText(inst.mail); toast("E-mailadres gekopieerd"); } catch (e) { toast(inst.mail); } };
+
+/* ---------- instellingen ---------- */
+$("#btnInst").onclick = () => {
+  $("#sNaam").value = inst.naam; $("#sMail").value = inst.mail; $("#sOnderwerp").value = inst.onderwerp; $("#sSoorten").value = inst.soorten.join("\n");
+  toon("inst");
+};
+for (const [id, key] of [["sNaam", "naam"], ["sMail", "mail"], ["sOnderwerp", "onderwerp"]])
+  $("#" + id).oninput = e => { inst[key] = e.target.value.trim(); bewaarInst(); };
+$("#sSoorten").oninput = e => { const l = e.target.value.split("\n").map(s => s.trim()).filter(Boolean); inst.soorten = l.length ? l : STANDAARD_SOORTEN; bewaarInst(); };
+$("#btnOpruimen").onclick = async () => {
+  const grens = Date.now() - 30 * 864e5; let n = 0;
+  for (const m of alles) if (m.verstuurd && m.ts < grens) { await DB.del(m.id); n++; }
+  toast(n ? `${n} oude melding(en) opgeruimd` : "Niets op te ruimen"); render();
+};
+
+/* ---------- start ---------- */
+toon("lijst"); render();
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>
