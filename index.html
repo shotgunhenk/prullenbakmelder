@@ -71,7 +71,7 @@ textarea{min-height:84px;resize:vertical}
 .bar .in{max-width:640px;margin:0 auto;display:flex;gap:10px}
 .bar button{flex:1;white-space:nowrap}
 .bar button.primary{flex:1.6}
-.view[hidden]{display:none!important}
+[hidden],.view[hidden]{display:none!important}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:15px;z-index:9;max-width:90vw;text-align:center}
 .note{font-size:14px;color:var(--muted)}
 .big{font-size:40px;font-weight:700;line-height:1}
@@ -83,6 +83,16 @@ textarea{min-height:84px;resize:vertical}
 .check{display:flex;gap:10px;align-items:center;font-weight:500;color:var(--fg)}
 .check input{width:22px;height:22px}
 .fout{color:var(--warn);font-size:14px}
+.toast button{margin-left:12px;min-height:0;padding:6px 12px;border-radius:8px;background:var(--accent);color:var(--accent-fg)}
+.herinner{border-color:var(--warn);background:var(--warn-soft)}
+.herinner b{color:var(--warn)}
+.dagknop{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;font-weight:500}
+.sugg{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:6px;background:var(--card)}
+.sugg button{background:none;border-radius:0;border-bottom:1px solid var(--line);text-align:left;font-weight:500;padding:11px 12px;min-height:44px}
+.sugg button:last-child{border-bottom:0}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:20;display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.lb img{max-width:100%;max-height:100%;object-fit:contain}
+.lb button{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;background:rgba(255,255,255,.18);color:#fff;border-radius:50%;width:44px;height:44px;padding:0;font-size:22px}
 </style>
 </head>
 <body>
@@ -96,10 +106,18 @@ textarea{min-height:84px;resize:vertical}
     <button class="ghost" id="btnInst" aria-label="Instellingen">Instellingen</button>
   </header>
 
+  <form class="card stack" id="naamKaart" hidden>
+    <div><label for="naamIn" style="color:var(--fg)">Hoe heet je? Je naam komt op het dagrapport.</label>
+      <div class="row"><input type="text" id="naamIn" autocomplete="name" style="flex:1 1 160px"><button type="submit" class="primary" style="flex:0 0 auto">Opslaan</button></div></div>
+  </form>
+
   <div class="card row" style="align-items:center">
     <div style="flex:0 0 auto"><div class="big" id="telVandaag">0</div></div>
-    <div class="note" style="flex:1 1 200px">meldingen vandaag. Aan het eind van de dag: <b>Dagrapport</b> → PDF maken → versturen met Mail.</div>
+    <div class="note" style="flex:1 1 200px" id="telUitleg">meldingen vandaag. Aan het eind van de dag: <b>Dagrapport</b> → PDF maken → versturen met Mail.</div>
+    <button class="primary" id="btnVerstuurVandaag" hidden style="flex:1 1 100%">Dagrapport van vandaag versturen</button>
   </div>
+
+  <div class="card stack herinner" id="herinnering" hidden></div>
 
   <h2>Vandaag</h2>
   <div class="stack" id="lijst"></div>
@@ -136,7 +154,8 @@ textarea{min-height:84px;resize:vertical}
       </div>
       <div>
         <label for="adres">Adres / plek (aan te passen)</label>
-        <input type="text" id="adres" placeholder="bv. Beatrixstraat 99, Emmen – bij bushalte">
+        <input type="text" id="adres" placeholder="Typ een adres om te zoeken, bv. Beatrixstraat 99 Emmen" aria-autocomplete="list" aria-controls="sugg">
+        <div class="sugg" id="sugg" hidden></div>
       </div>
     </div>
 
@@ -155,10 +174,10 @@ textarea{min-height:84px;resize:vertical}
       </div>
     </div>
 
-    <div class="row">
+    <div class="bar"><div class="in">
       <button type="button" class="danger" id="btnVerwijder" hidden style="flex:0 0 auto">Verwijderen</button>
       <button type="submit" class="primary" id="btnOpslaan">Melding opslaan</button>
-    </div>
+    </div></div>
   </form>
 </section>
 
@@ -175,6 +194,7 @@ textarea{min-height:84px;resize:vertical}
       </div>
       <label class="check" id="alleenMijnRij" hidden><input type="checkbox" id="alleenMijn"> Alleen mijn eigen meldingen</label>
       <div class="note" id="rapInfo"></div>
+      <div class="stack" id="openDagen" hidden style="gap:6px"></div>
       <button class="primary" id="btnMaakPdf">PDF maken</button>
     </div>
     <div class="card stack" id="pdfKlaar" hidden>
@@ -244,6 +264,7 @@ textarea{min-height:84px;resize:vertical}
 const $ = s => document.querySelector(s);
 const STANDAARD_SOORTEN = ["Vol / puilt uit","Afval naast de bak","Kapot / beschadigd","Deksel of klep stuk","Bak ontbreekt","Scheef / losgeraakt","Brandschade","Graffiti / beplakt","Stank / ongedierte","Anders"];
 
+const CONCEPT = "__concept";   // nieuwe melding die nog niet is opgeslagen (overleeft het sluiten van de app)
 /* ---------- opslag (IndexedDB) ---------- */
 const DB = (() => {
   let dbp;
@@ -256,7 +277,7 @@ const DB = (() => {
     const t = db.transaction("meldingen", mode); const st = t.objectStore("meldingen");
     const out = fn(st); t.oncomplete = () => res(out instanceof IDBRequest ? out.result : out); t.onerror = () => rej(t.error); }); };
   return {
-    all: () => tx("readonly", st => st.getAll()),
+    all: async () => (await tx("readonly", st => st.getAll())).filter(m => m.id !== CONCEPT),
     get: id => tx("readonly", st => st.get(id)),
     put: m => tx("readwrite", st => st.put(m)),
     del: id => tx("readwrite", st => st.delete(id)),
@@ -279,8 +300,14 @@ const dagLang = key => { const [y, m, d] = key.split("-").map(Number);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const mapsUrl = (lat, lon) => `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
 let toastT;
-function toast(msg) { let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.append(t); }
-  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600); }
+function toast(msg, actie) { let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.append(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastT);
+  if (actie) { const b = document.createElement("button"); b.textContent = actie.label; b.onclick = () => { t.hidden = true; actie.fn(); }; t.append(b); }
+  toastT = setTimeout(() => t.hidden = true, actie ? 5000 : 2600); }
+function vergroot(src) {
+  const d = document.createElement("div"); d.className = "lb"; d.innerHTML = `<img alt="Foto groot"><button type="button" aria-label="Sluiten">×</button>`;
+  d.querySelector("img").src = src; d.onclick = () => d.remove(); document.body.append(d);
+}
 
 /* ---------- schermen ---------- */
 function toon(v) {
@@ -458,6 +485,20 @@ async function render() {
   $("#vandaagTxt").textContent = dagLang(vandaag);
   const vd = alles.filter(m => m.dag === vandaag);
   $("#telVandaag").textContent = vd.length;
+  $("#naamKaart").hidden = !!inst.naam;
+  // wat moet er nog naar de gemeente? (alleen eigen meldingen)
+  const openVd = vd.filter(m => !m.verstuurd && isMijn(m)).length;
+  $("#btnVerstuurVandaag").hidden = !openVd;
+  $("#btnVerstuurVandaag").textContent = `Dagrapport van vandaag versturen (${openVd})`;
+  $("#telUitleg").textContent = (vd.length === 1 ? "melding vandaag." : "meldingen vandaag.") +
+    (vd.length && !openVd ? " Alles is verstuurd ✓" : vd.length ? "" : " Aan het eind van de dag maak je hier het dagrapport (PDF) en verstuur je het met Mail.");
+  const openDagen = openDagenLijst().filter(([d]) => d !== vandaag);
+  const h = $("#herinnering"); h.hidden = !openDagen.length; h.innerHTML = "";
+  if (openDagen.length) {
+    h.innerHTML = `<div><b>Nog niet verstuurd</b><div class="note">Deze dagrapporten zijn nog niet naar de gemeente gegaan:</div></div>`;
+    openDagen.forEach(([d, n]) => { const b = document.createElement("button"); b.className = "dagknop";
+      b.innerHTML = `<span>${esc(dagLang(d))}</span><span>${n} ›</span>`; b.onclick = () => openRapport(d); h.append(b); });
+  }
   $("#lijst").innerHTML = vd.length ? "" : `<div class="card empty">Nog geen meldingen vandaag.<br>Tik op <b>+ Nieuwe melding</b> en maak een foto van de bak.</div>`;
   vd.forEach(m => $("#lijst").append(itemEl(m)));
 
@@ -472,6 +513,13 @@ async function render() {
     box.append(h); perDag[d].forEach(m => box.append(itemEl(m)));
   });
 }
+/* dagen met eigen meldingen die nog niet verstuurd zijn: [[dag, aantal], ...] nieuwste eerst */
+function openDagenLijst() {
+  const tel = {}; alles.filter(m => !m.verstuurd && isMijn(m)).forEach(m => tel[m.dag] = (tel[m.dag] || 0) + 1);
+  return Object.entries(tel).sort((a, b) => b[0].localeCompare(a[0]));
+}
+$("#btnVerstuurVandaag").onclick = () => openRapport(dagKey(new Date()));
+$("#naamKaart").onsubmit = e => { e.preventDefault(); const n = $("#naamIn").value.trim(); if (!n) return; inst.naam = n; bewaarInst(); render(); toast("Bedankt, " + n); };
 function itemEl(m) {
   const el = document.createElement("button");
   el.type = "button"; el.className = "card item"; el.style.textAlign = "left"; el.style.fontWeight = "400";
@@ -494,15 +542,19 @@ function nieuweMelding() {
     user_id: mijnId(), melder: "", dirty: true, updated: nu.getTime() };
 }
 const mijnNaam = () => inst.naam || (sessie?.user?.email || "").split("@")[0];
-function openForm(m) {
+let huidigNieuw = false;
+function openForm(m, concept) {
   const nieuw = !m;
-  huidig = nieuw ? nieuweMelding() : structuredClone(m);
+  huidigNieuw = nieuw;
+  if (concept) { const { conceptVan, ...r } = concept; huidig = { ...r, id: conceptVan }; }
+  else huidig = nieuw ? nieuweMelding() : structuredClone(m);
   $("#formTitel").textContent = nieuw ? "Nieuwe melding" : "Melding bewerken";
   $("#btnVerwijder").hidden = nieuw; $("#btnVerwijder").textContent = "Verwijderen";
   $("#adres").value = huidig.adres; $("#tekst").value = huidig.tekst; $("#nummer").value = huidig.nummer;
+  $("#sugg").hidden = true;
   renderFotos(); renderSoorten(); toonLoc();
   toon("form");
-  if (nieuw) { bepaalLocatie(); }
+  if (nieuw) { if (huidig.lat == null) bepaalLocatie(); }
   else if (huidig.fotos.some(f => !f.src)) { const h = huidig; laadFotos(h).then(v => { if (v && h === huidig) renderFotos(); }); }
 }
 function renderFotos() {
@@ -510,7 +562,8 @@ function renderFotos() {
   huidig.fotos.forEach((f, i) => {
     const d = document.createElement("div"); d.className = "ph";
     d.innerHTML = `<img alt="Foto ${i + 1}" ${f.src ? `src="${f.src}"` : ""}><button type="button" class="x" aria-label="Foto verwijderen">×</button>`;
-    d.querySelector(".x").onclick = () => { const [weg] = huidig.fotos.splice(i, 1); if (weg?.path) (huidig.oudePaden ||= []).push(weg.path); renderFotos(); };
+    d.querySelector("img").onclick = () => f.src && vergroot(f.src);
+    d.querySelector(".x").onclick = () => { const [weg] = huidig.fotos.splice(i, 1); if (weg?.path) (huidig.oudePaden ||= []).push(weg.path); renderFotos(); bewaarConcept(); };
     box.append(d);
   });
   box.hidden = !huidig.fotos.length;
@@ -523,7 +576,7 @@ function renderSoorten() {
   lijst.forEach(s => {
     const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = s;
     b.setAttribute("aria-pressed", huidig.soorten.includes(s));
-    b.onclick = () => { const i = huidig.soorten.indexOf(s); i < 0 ? huidig.soorten.push(s) : huidig.soorten.splice(i, 1); b.setAttribute("aria-pressed", i < 0); };
+    b.onclick = () => { const i = huidig.soorten.indexOf(s); i < 0 ? huidig.soorten.push(s) : huidig.soorten.splice(i, 1); b.setAttribute("aria-pressed", i < 0); bewaarConcept(); };
     box.append(b);
   });
 }
@@ -532,8 +585,59 @@ $("#btnLib").onclick = () => $("#fotoLib").click();
 for (const inp of [$("#fotoIn"), $("#fotoLib")]) inp.onchange = async () => {
   const files = [...inp.files]; inp.value = "";
   for (const f of files) { try { huidig.fotos.push(await verklein(f)); } catch (e) { toast("Foto kon niet gelezen worden"); } }
-  renderFotos();
+  renderFotos(); bewaarConcept();
 };
+
+/* concept: een nieuwe melding wordt tussentijds bewaard, zodat niets verloren gaat als de telefoon
+   de app sluit (bv. tijdens het fotograferen) of als je per ongeluk wegklikt */
+let conceptT;
+function bewaarConcept() {
+  if (!huidig || !huidigNieuw) return;
+  clearTimeout(conceptT);
+  conceptT = setTimeout(() => {
+    if (!huidig || !huidigNieuw) return;
+    const c = { ...huidig, adres: $("#adres").value, tekst: $("#tekst").value, nummer: $("#nummer").value, conceptVan: huidig.id, id: CONCEPT };
+    if (!c.fotos.length && !c.soorten.length && !c.tekst.trim() && !c.nummer.trim()) return;
+    DB.put(c).catch(e => console.warn("concept niet bewaard", e));
+  }, 300);
+}
+function wisConcept() { clearTimeout(conceptT); return DB.del(CONCEPT).catch(() => {}); }
+const heeftConcept = async () => { try { return await DB.get(CONCEPT); } catch (e) { return null; } };
+for (const id of ["adres", "tekst", "nummer"]) $("#" + id).addEventListener("input", bewaarConcept);
+
+/* adres zoeken (PDOK): ook handig als de GPS het niet doet */
+let suggT, suggNr = 0;
+$("#adres").addEventListener("input", () => {
+  clearTimeout(suggT); const q = $("#adres").value.trim();
+  if (q.length < 3) { $("#sugg").hidden = true; suggNr++; return; }
+  suggT = setTimeout(() => zoekSuggesties(q), 250);
+});
+$("#adres").addEventListener("blur", () => setTimeout(() => $("#sugg").hidden = true, 200));
+$("#adres").addEventListener("keydown", e => { if (e.key === "Escape") $("#sugg").hidden = true; });
+async function zoekSuggesties(q) {
+  const nr = ++suggNr;
+  const bij = huidig?.lat != null ? huidig : alles.find(m => m.lat != null);   // dichtbij eerst
+  let url = `https://api.pdok.nl/bzk/locatieserver/search/v3_1/suggest?q=${encodeURIComponent(q)}&fq=type:(adres%20OR%20weg)&rows=5&fl=id,weergavenaam,centroide_ll`;
+  if (bij) url += `&lat=${bij.lat.toFixed(5)}&lon=${bij.lon.toFixed(5)}`;
+  let docs; try { docs = (await (await fetch(url)).json()).response.docs; } catch (e) { return; }
+  if (nr !== suggNr || !huidig) return;
+  const box = $("#sugg"); box.innerHTML = "";
+  docs.forEach(d => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = d.weergavenaam;
+    b.onmousedown = e => e.preventDefault();   // niet eerst de blur laten afgaan
+    b.onclick = () => kiesAdres(d);
+    box.append(b);
+  });
+  box.hidden = !docs.length || document.activeElement !== $("#adres");
+}
+function kiesAdres(d) {
+  $("#adres").value = d.weergavenaam; $("#sugg").hidden = true; suggNr++;
+  const p = /POINT\(([\d.]+) ([\d.]+)\)/.exec(d.centroide_ll || "");
+  if (p && (huidig.lat == null || huidig.locBron === "adres")) {   // geen GPS? dan de plek van het adres gebruiken
+    huidig.lon = +p[1]; huidig.lat = +p[2]; huidig.acc = null; huidig.locBron = "adres"; toonLoc();
+  }
+  bewaarConcept();
+}
 async function verklein(file, max = 1400) {
   let bron;
   try { bron = await createImageBitmap(file, { imageOrientation: "from-image" }); }
@@ -552,7 +656,7 @@ function toonLoc(status) {
   if (status === "busy") { $("#locTxt").textContent = "Locatie bepalen…"; $("#locSub").textContent = ""; return; }
   if (huidig.lat != null) {
     $("#locTxt").innerHTML = `<a href="${mapsUrl(huidig.lat, huidig.lon)}" target="_blank" rel="noopener">${huidig.lat.toFixed(5)}, ${huidig.lon.toFixed(5)}</a>`;
-    $("#locSub").textContent = huidig.acc ? `nauwkeurig tot ± ${Math.round(huidig.acc)} m` : "";
+    $("#locSub").textContent = huidig.locBron === "adres" ? "plek van het gekozen adres" : huidig.acc ? `nauwkeurig tot ± ${Math.round(huidig.acc)} m` : "";
   } else if (status !== "err") { $("#locTxt").textContent = "Locatie nog niet bepaald"; $("#locSub").textContent = ""; }
 }
 function bepaalLocatie() {
@@ -561,13 +665,14 @@ function bepaalLocatie() {
   const voor = huidig;
   navigator.geolocation.getCurrentPosition(async p => {
     locBezig = false; if (voor !== huidig) return;
-    huidig.lat = p.coords.latitude; huidig.lon = p.coords.longitude; huidig.acc = p.coords.accuracy; toonLoc();
+    huidig.lat = p.coords.latitude; huidig.lon = p.coords.longitude; huidig.acc = p.coords.accuracy; huidig.locBron = "gps"; toonLoc();
     const adr = await zoekAdres(huidig.lat, huidig.lon);
     if (adr && voor === huidig && !$("#adres").value.trim()) { $("#adres").value = adr; }
+    bewaarConcept();
   }, err => {
     locBezig = false; if (voor !== huidig) return;
     $("#locTxt").textContent = err.code === 1 ? "Geen toestemming voor locatie" : "Locatie niet gevonden";
-    $("#locSub").textContent = err.code === 1 ? "Zet in Instellingen › Privacy › Locatievoorzieningen de locatie aan voor Safari, of typ het adres hieronder." : "Tik op Opnieuw, of typ het adres hieronder.";
+    $("#locSub").textContent = err.code === 1 ? "Typ hieronder het adres en kies het uit de lijst. (Of zet in Instellingen › Privacy › Locatievoorzieningen de locatie aan voor Safari.)" : "Tik op Opnieuw, of typ hieronder het adres en kies het uit de lijst.";
     toonLoc("err");
   }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 });
 }
@@ -581,10 +686,11 @@ async function zoekAdres(lat, lon) {
 }
 $("#btnLoc").onclick = () => { $("#adres").value = ""; bepaalLocatie(); };
 
-$("#btnAnnuleer").onclick = () => {
-  const nieuwMetInhoud = huidig && $("#formTitel").textContent === "Nieuwe melding" &&
+$("#btnAnnuleer").onclick = async () => {
+  const nieuwMetInhoud = huidig && huidigNieuw &&
     (huidig.fotos.length || huidig.soorten.length || $("#tekst").value.trim() || $("#nummer").value.trim());
   if (nieuwMetInhoud && !confirm("Deze melding is nog niet opgeslagen. Weggooien?")) return;
+  if (huidigNieuw) await wisConcept();
   huidig = null; toon("lijst"); render();
 };
 $("#form").onsubmit = async e => {
@@ -601,8 +707,10 @@ $("#form").onsubmit = async e => {
     huidig.synced = huidig.synced || opg.synced; huidig.user_id ||= opg.user_id;
   }
   huidig.updated = Date.now(); huidig.dirty = true;
-  await DB.put(huidig); huidig = null;
-  toast("Melding opgeslagen"); toon("lijst"); await render(); sync();
+  const wasNieuw = huidigNieuw;
+  await DB.put(huidig); huidig = null; if (wasNieuw) await wisConcept();
+  toon("lijst"); await render();
+  toast("Melding opgeslagen", wasNieuw ? { label: "+ Nog een", fn: () => openForm(null) } : null); sync();
 };
 $("#btnVerwijder").onclick = async () => {
   const b = $("#btnVerwijder");
@@ -613,11 +721,26 @@ $("#btnVerwijder").onclick = async () => {
   else await DB.del(huidig.id);
   huidig = null; toast("Verwijderd"); toon("lijst"); await render(); sync();
 };
-$("#btnNieuw").onclick = () => openForm(null);
+$("#btnNieuw").onclick = async () => {
+  const c = await heeftConcept();
+  if (c) { openForm(null, c); toast("Je onafgemaakte melding is teruggezet"); } else openForm(null);
+};
+document.addEventListener("keydown", e => { if (e.key === "Escape") document.querySelector(".lb")?.remove(); });
 
 /* ---------- dagrapport ---------- */
 let pdfBestand = null;
-$("#btnRapport").onclick = () => { $("#rapDatum").value = dagKey(new Date()); rapInfo(); toon("rapport"); };
+function openRapport(dag) { $("#rapDatum").value = dag; rapInfo(); toon("rapport"); }
+$("#btnRapport").onclick = () => {
+  // standaard vandaag; is er vandaag niets open maar een eerdere dag wel, dan die
+  const vd = dagKey(new Date()), open = openDagenLijst();
+  openRapport(open.length && !open.some(([d]) => d === vd) && !alles.some(m => m.dag === vd) ? open[0][0] : vd);
+};
+function toonOpenDagen() {
+  const box = $("#openDagen"), d = $("#rapDatum").value, andere = openDagenLijst().filter(([x]) => x !== d);
+  box.hidden = !andere.length; box.innerHTML = andere.length ? `<div class="note">Ook nog niet verstuurd:</div>` : "";
+  andere.forEach(([x, n]) => { const b = document.createElement("button"); b.className = "dagknop";
+    b.innerHTML = `<span>${esc(dagLang(x))}</span><span>${n} ›</span>`; b.onclick = () => openRapport(x); box.append(b); });
+}
 $("#rapDatum").onchange = rapInfo;
 $("#alleenMijn").onchange = rapInfo;
 const rapLijst = () => { const d = $("#rapDatum").value;
@@ -627,7 +750,8 @@ function rapInfo() {
   $("#alleenMijnRij").hidden = !alles.some(m => !isMijn(m));
   const d = $("#rapDatum").value; const n = rapLijst();
   $("#rapInfo").textContent = n.length ? `${n.length} melding(en) op ${dagLang(d)}${n.some(m => m.verstuurd) ? " (deels al verstuurd)" : ""}.` : "Geen meldingen op deze dag.";
-  $("#btnMaakPdf").disabled = !n.length;
+  $("#btnMaakPdf").disabled = !n.length; $("#btnMaakPdf").textContent = "PDF maken";
+  toonOpenDagen();
 }
 $("#btnMaakPdf").onclick = async () => {
   const b = $("#btnMaakPdf"); b.disabled = true; b.textContent = "PDF wordt gemaakt…";
@@ -721,7 +845,7 @@ async function markeerVerstuurd() {
   if (!pdfBestand) return;
   for (const id of pdfBestand.ids) { const m = (await DB.all()).find(x => x.id === id);
     if (m && !m.verstuurd) { m.verstuurd = true; m.updated = Date.now(); m.dirty = true; await DB.put(m); } }
-  await render(); sync();
+  await render(); toonOpenDagen(); sync();
 }
 $("#btnDeel").onclick = async () => {
   if (!pdfBestand) return;
@@ -783,6 +907,10 @@ $("#btnOpruimen").onclick = async () => {
 (async () => {
   toon("lijst"); await initAuth(); await render();
   if (!sb) importeer(); else if (!sessie) toon("login"); else sync();
+  if (!sb || sessie) {   // app was gesloten tijdens een nieuwe melding? dan daar verder
+    const c = await heeftConcept();
+    if (c && !huidig) { openForm(null, c); toast("Je onafgemaakte melding is teruggezet"); }
+  }
 })();
 window.addEventListener("online", sync);
 window.addEventListener("offline", toonStatus);

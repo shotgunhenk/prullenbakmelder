@@ -81,6 +81,15 @@ td .sub{color:var(--muted);font-size:12px}
 .login input{width:100%;padding:10px 12px}
 .fout{color:var(--warn);font-weight:600}
 .leaflet-container{font:inherit}
+.detail .kop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.detail .sluit{background:none;font-size:20px;line-height:1;padding:2px 8px;color:var(--muted)}
+.stats .bulk{margin-left:auto}
+.hint{color:var(--muted);font-size:12px}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2000;display:flex;align-items:center;justify-content:center}
+.lb img{max-width:92vw;max-height:88vh;object-fit:contain;border-radius:6px}
+.lb button{position:absolute;background:rgba(255,255,255,.16);color:#fff;border-radius:50%;width:46px;height:46px;justify-content:center;font-size:22px;padding:0}
+.lb .x{top:16px;right:16px} .lb .vorige{left:16px;top:50%} .lb .volgende{right:16px;top:50%}
+.lb .tel{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#ddd;font-size:13px}
 
 @media (max-width:900px){
   body{height:auto}
@@ -207,7 +216,13 @@ for (const id of ["fVan", "fTot"]) $("#" + id).onchange = () => { document.query
 for (const id of ["fSoort", "fMelder", "fStatus"]) $("#" + id).onchange = () => toon();
 $("#fZoek").oninput = () => toon();
 $("#verversen").onclick = () => laad();
-zetPeriode(6);
+// keuzes onthouden (per computer)
+const onthoud = (() => { try { return JSON.parse(localStorage.getItem("kantoorKeuze") || "{}"); } catch (e) { return {}; } })();
+const bewaarKeuze = () => { try { localStorage.setItem("kantoorKeuze", JSON.stringify({ dagen: document.querySelector("[data-dagen][aria-pressed=true]")?.dataset.dagen, status: $("#fStatus").value })); } catch (e) {} };
+zetPeriode(onthoud.dagen != null ? +onthoud.dagen : 6);
+if (onthoud.status) $("#fStatus").value = onthoud.status;
+document.querySelectorAll("[data-dagen]").forEach(b => b.addEventListener("click", bewaarKeuze));
+$("#fStatus").addEventListener("change", bewaarKeuze);
 
 /* ---------- data ---------- */
 let laadNr = 0, laatsteVersie = "";
@@ -254,7 +269,10 @@ function toon(kaartPassen = true) {
   const tel = {}; gefilterd.forEach(r => r.soorten.forEach(s => tel[s] = (tel[s] || 0) + 1));
   const top = Object.entries(tel).sort((a, b) => b[1] - a[1])[0];
   $("#stats").innerHTML = `<span><b>${gefilterd.length}</b> meldingen</span><span><b>${open}</b> nog niet verstuurd</span><span><b>${plekken}</b> locaties</span>` +
-    (top ? `<span>Meest gemeld: <b>${esc(top[0])}</b> (${top[1]}×)</span>` : "") + (gefilterd.length < rijen.length ? `<span>${rijen.length - gefilterd.length} weggefilterd</span>` : "");
+    (top ? `<span>Meest gemeld: <b>${esc(top[0])}</b> (${top[1]}×)</span>` : "") + (gefilterd.length < rijen.length ? `<span>${rijen.length - gefilterd.length} weggefilterd</span>` : "") +
+    (open ? `<button class="bulk" id="bulk">✓ ${open === 1 ? "Deze melding" : `Alle ${open} open meldingen`} markeren als verstuurd</button>` : "") +
+    (gefilterd.length ? `<span class="hint">Tip: ↑ ↓ om door de lijst te gaan, Esc om te sluiten</span>` : "");
+  $("#bulk") && ($("#bulk").onclick = bulkVerstuurd);
 
   const tb = $("#rijen"); tb.innerHTML = "";
   for (const r of gefilterd) {
@@ -327,7 +345,7 @@ async function toonDetail() {
   const r = rijen.find(x => x.id === gekozen); const d = $("#detail"); if (!r) { d.hidden = true; return; }
   d.hidden = false;
   const heeftLoc = r.lat != null && r.lon != null;
-  d.innerHTML = `<h2>${esc(r.adres || "Onbekende plek")}</h2>
+  d.innerHTML = `<div class="kop"><h2>${esc(r.adres || "Onbekende plek")}</h2><button class="sluit" id="dSluit" aria-label="Detail sluiten" title="Sluiten (Esc)">×</button></div>
     <div class="meta">${esc(new Date(r.ts).toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}, ${tijd(r.ts)} uur${r.melder ? " · " + esc(r.melder) : ""}</div>
     <div>${r.soorten.map(s => `<span class="tag">${esc(s)}</span>`).join("")}</div>
     <dl>${r.tekst ? `<dt>Toelichting</dt><dd>${esc(r.tekst)}</dd>` : ""}${r.nummer ? `<dt>Nummer bak</dt><dd>${esc(r.nummer)}</dd>` : ""}
@@ -339,6 +357,8 @@ async function toonDetail() {
       <button id="dStatus">${r.verstuurd ? "Markeer als niet verstuurd" : "Markeer als verstuurd"}</button>
     </div>`;
   $("#dStatus").onclick = () => zetVerstuurd(r, !r.verstuurd);
+  $("#dSluit").onclick = sluitDetail;
+  d.querySelectorAll("#dFotos a").forEach((a, i) => a.onclick = e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); lightbox(r, i); });
   await signUrls(r.fotos.map(f => f.path));
   if (gekozen !== r.id) return;
   d.querySelectorAll("#dFotos a").forEach(a => { const u = urlVan(a.dataset.path); if (u) { a.href = u; a.querySelector("img").src = u; } });
@@ -349,6 +369,58 @@ async function zetVerstuurd(r, waarde) {
   const { error } = await sb.from("meldingen").update({ verstuurd: waarde, updated_at: nu }).eq("id", r.id);
   if (error) { b.disabled = false; alert("Opslaan mislukt: " + error.message); return; }
   r.verstuurd = waarde; r.updated_at = nu; toon(false);
+}
+
+function sluitDetail() {
+  gekozen = null; $("#detail").hidden = true;
+  document.querySelectorAll("#rijen tr.sel").forEach(tr => tr.classList.remove("sel"));
+  markers.forEach(m => m.setRadius(7));
+}
+
+/* foto's groot bekijken, met pijltjes bladeren */
+let lb = null;
+async function lightbox(r, i) {
+  lb?.el.remove();
+  const el = document.createElement("div"); el.className = "lb";
+  el.innerHTML = `<img alt="Foto van de melding"><button class="x" aria-label="Sluiten">×</button>` +
+    (r.fotos.length > 1 ? `<button class="vorige" aria-label="Vorige foto">‹</button><button class="volgende" aria-label="Volgende foto">›</button>` : "") + `<div class="tel"></div>`;
+  document.body.append(el); lb = { el, r, i };
+  el.onclick = e => { if (e.target === el || e.target.classList.contains("x")) sluitLb(); };
+  el.querySelector(".vorige")?.addEventListener("click", () => blader(-1));
+  el.querySelector(".volgende")?.addEventListener("click", () => blader(1));
+  await toonLbFoto();
+}
+function sluitLb() { lb?.el.remove(); lb = null; }
+function blader(d) { if (!lb) return; lb.i = (lb.i + d + lb.r.fotos.length) % lb.r.fotos.length; toonLbFoto(); }
+async function toonLbFoto() {
+  const { el, r, i } = lb, p = r.fotos[i]?.path; if (!p) return;
+  el.querySelector(".tel").textContent = `${r.adres || ""}  ·  foto ${i + 1} van ${r.fotos.length}`;
+  await signUrls([p]); if (lb?.el === el && lb.i === i) el.querySelector("img").src = urlVan(p) || "";
+}
+
+/* toetsenbord: ↑/↓ door de lijst, Esc sluit */
+document.addEventListener("keydown", e => {
+  if (lb) { if (e.key === "Escape") sluitLb(); else if (e.key === "ArrowLeft") blader(-1); else if (e.key === "ArrowRight") blader(1); return; }
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) return;
+  if (e.key === "Escape" && gekozen) { sluitDetail(); return; }
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && gefilterd.length) {
+    e.preventDefault();
+    const i = gefilterd.findIndex(r => r.id === gekozen), j = i < 0 ? 0 : Math.max(0, Math.min(gefilterd.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+    kies(gefilterd[j].id, true); document.querySelector(`#rijen tr[data-id="${gefilterd[j].id}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+});
+
+/* alle open meldingen in de huidige selectie in één keer op verstuurd zetten */
+async function bulkVerstuurd() {
+  const ids = gefilterd.filter(r => !r.verstuurd).map(r => r.id); if (!ids.length) return;
+  if (!confirm(`${ids.length} melding(en) markeren als verstuurd naar de gemeente?`)) return;
+  const nu = new Date().toISOString();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { error } = await sb.from("meldingen").update({ verstuurd: true, updated_at: nu }).in("id", ids.slice(i, i + 200));
+    if (error) { alert("Opslaan mislukt: " + error.message); break; }
+    rijen.filter(r => ids.slice(i, i + 200).includes(r.id)).forEach(r => { r.verstuurd = true; r.updated_at = nu; });
+  }
+  toon(false);
 }
 
 /* ---------- CSV ---------- */
