@@ -1,4 +1,4 @@
-const VERSION = "pb-10";
+const VERSION = "pb-11";
 const FILES = ["./", "index.html", "kantoor.html", "jspdf.umd.min.js", "supabase.js", "config.js", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png", "logo-area.jpg"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k))))); self.clients.claim(); });
