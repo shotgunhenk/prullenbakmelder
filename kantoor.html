@@ -419,7 +419,7 @@ function kies(id, centreer) {
   if (!centreer) document.querySelector(`#rijen tr[data-id="${id}"]`)?.scrollIntoView({ block: "nearest" });
   toonDetail();
   // smal scherm: het detail (met de knoppen) staat onder de kaart, dus erheen scrollen
-  if (centreer && matchMedia("(max-width:900px)").matches) requestAnimationFrame(() => $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }));
+  if (centreer && matchMedia("(max-width:900px)").matches) setTimeout(() => $("#detail").scrollIntoView({ behavior: "smooth", block: "start" }), 60);
 }
 async function toonDetail() {
   const r = rijen.find(x => x.id === gekozen); const d = $("#detail"); if (!r) { d.hidden = true; return; }
