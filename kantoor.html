@@ -361,12 +361,12 @@ const dorpBezig = new Set();
 function dorpUitAdres(a) {
   const delen = String(a || "").split(",").map(x => x.trim()).filter(Boolean);
   if (delen.length < 2) return "";
-  const d = delen[delen.length - 1].replace(/^\d{4}\s?[A-Za-z]{2}\s+/, "").trim();
-  return d && !/\d/.test(d) ? d : "";
+  const m = delen[delen.length - 1].match(/^\d{4}\s?[A-Za-z]{2}\s+(\D+)$/);   // alleen "1234AB Plaats" (van PDOK), geen zelf getypte tekst
+  return m ? m[1].trim() : "";
 }
 function dorpVan(r) {
   const d = dorpUitAdres(r.adres); if (d) return d;
-  if (r.lat == null || r.lon == null) return "Onbekend";
+  if (r.lat == null || r.lon == null) return "Onbekend (geen locatie)";
   const k = (+r.lat).toFixed(4) + "," + (+r.lon).toFixed(4);
   if (dorpCache[k]) return dorpCache[k];
   zoekDorp(k, r.lat, r.lon); return "Onbekend";
