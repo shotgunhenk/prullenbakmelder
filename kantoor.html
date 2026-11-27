@@ -112,6 +112,22 @@ html[data-theme=dark] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) bri
 .detail .sluit{background:none;font-size:20px;line-height:1;padding:2px 8px;color:var(--muted)}
 .stats .bulk{margin-left:auto}
 .hint{color:var(--muted);font-size:12px}
+.dorpen{padding:12px 18px 14px;border-top:1px solid var(--line);background:var(--card)}
+.dorpen .kop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.dorpen h2{font-size:15px;margin:0}
+.dorpen .seg{display:flex;gap:4px;margin-left:auto}
+.dorpen .seg button{padding:4px 10px;font-size:12px}
+.dorpen ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 24px}
+.dorpen li button{width:100%;display:grid;grid-template-columns:22px minmax(90px,150px) 1fr 34px;align-items:center;gap:8px;background:none;padding:5px 6px;font-weight:500;text-align:left}
+.dorpen li button:hover{background:var(--hover)}
+.dorpen li button[aria-pressed=true]{background:var(--accent-soft);color:var(--fg)}
+.dorpen .nr{color:var(--muted);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.dorpen .naam{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dorpen .balk{height:10px;border-radius:5px;background:var(--accent-soft);overflow:hidden}
+.dorpen .balk i{display:block;height:100%;background:var(--accent);border-radius:5px}
+.dorpen li:first-child .balk i{background:var(--open)}
+.dorpen .aantal{font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.dorpen .leeg{padding:10px 0;text-align:left}
 .lb{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2000;display:flex;align-items:center;justify-content:center}
 .lb img{max-width:92vw;max-height:88vh;object-fit:contain;border-radius:6px}
 .lb button{position:absolute;background:rgba(255,255,255,.16);color:#fff;border-radius:50%;width:46px;height:46px;justify-content:center;font-size:22px;padding:0}
@@ -162,17 +178,20 @@ html[data-theme=dark] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) bri
   <label class="f">Van<input type="date" id="fVan"></label>
   <label class="f">Tot en met<input type="date" id="fTot"></label>
   <div class="snel" role="group" aria-label="Snelle periode">
-    <button data-dagen="0">Vandaag</button><button data-dagen="6">7 dagen</button><button data-dagen="29">30 dagen</button>
+    <button data-dagen="0">Vandaag</button><button data-dagen="6">7 dagen</button><button data-dagen="29">30 dagen</button><button data-dagen="364">Jaar</button>
   </div>
   <label class="f">Probleem<select id="fSoort"><option value="">Alle</option></select></label>
+  <label class="f">Dorp<select id="fDorp"><option value="">Alle dorpen</option></select></label>
   <label class="f">Melder<select id="fMelder"><option value="">Iedereen</option></select></label>
   <label class="f">Status<select id="fStatus"><option value="">Alle</option><option value="open">Nog niet verstuurd</option><option value="verstuurd">Verstuurd</option><option value="monteur">Bij monteur</option></select></label>
   <label class="f zoek">Zoeken<input type="search" id="fZoek" placeholder="Adres, toelichting, nummer…"></label>
   <button id="verversen" title="Opnieuw ophalen">↻ Verversen</button>
+  <button id="perDorp" aria-pressed="false" title="Overzicht: in welk dorp de meeste prullenbakken kapot gaan">📊 Per dorp</button>
   <button id="csv">⬇ CSV</button>
 </div>
 
 <div class="stats" id="stats"></div>
+<section class="dorpen" id="dorpen" hidden aria-label="Meldingen per dorp"></section>
 
 <div class="werk">
   <div class="tabelbox">
@@ -291,7 +310,7 @@ function zetPeriode(dagen) {
 }
 document.querySelectorAll("[data-dagen]").forEach(b => b.onclick = () => { zetPeriode(+b.dataset.dagen); laad(); });
 for (const id of ["fVan", "fTot"]) $("#" + id).onchange = () => { document.querySelectorAll("[data-dagen]").forEach(b => b.setAttribute("aria-pressed", false)); laad(); };
-for (const id of ["fSoort", "fMelder", "fStatus"]) $("#" + id).onchange = () => toon();
+for (const id of ["fSoort", "fDorp", "fMelder", "fStatus"]) $("#" + id).onchange = () => toon();
 $("#fZoek").oninput = () => toon();
 $("#verversen").onclick = () => laad();
 // keuzes onthouden (per computer)
@@ -331,14 +350,67 @@ function vulKeuzes() {
     if ([...waarden].includes(nu)) sel.value = nu; };
   zet($("#fSoort"), new Set(rijen.flatMap(r => r.soorten)));
   zet($("#fMelder"), new Set(rijen.map(r => r.melder).filter(Boolean)));
+  zet($("#fDorp"), new Set(rijen.map(dorpVan)));
 }
+
+/* ---------- dorp / woonplaats (alleen in het kantoor) ---------- */
+// uit het adres ("Columbusstraat 25, 7825VP Emmen" → Emmen), anders via de coördinaten bij PDOK opzoeken
+const SCHADE = /kapot|beschadig|stuk|ontbreekt|scheef|los|brand|graffiti|beplakt|vernield|vandal/i;
+const dorpCache = (() => { try { return JSON.parse(localStorage.getItem("dorpCache") || "{}"); } catch (e) { return {}; } })();
+const dorpBezig = new Set();
+function dorpUitAdres(a) {
+  const delen = String(a || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (delen.length < 2) return "";
+  const d = delen[delen.length - 1].replace(/^\d{4}\s?[A-Za-z]{2}\s+/, "").trim();
+  return d && !/\d/.test(d) ? d : "";
+}
+function dorpVan(r) {
+  const d = dorpUitAdres(r.adres); if (d) return d;
+  if (r.lat == null || r.lon == null) return "Onbekend";
+  const k = (+r.lat).toFixed(4) + "," + (+r.lon).toFixed(4);
+  if (dorpCache[k]) return dorpCache[k];
+  zoekDorp(k, r.lat, r.lon); return "Onbekend";
+}
+async function zoekDorp(k, lat, lon) {
+  if (dorpBezig.has(k)) return; dorpBezig.add(k);
+  try {
+    const res = await fetch(`https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse?lat=${lat}&lon=${lon}&rows=1&type=adres&fl=woonplaatsnaam,weergavenaam`);
+    const doc = (await res.json())?.response?.docs?.[0], w = doc?.woonplaatsnaam || dorpUitAdres(doc?.weergavenaam);
+    if (w) { dorpCache[k] = w; try { localStorage.setItem("dorpCache", JSON.stringify(dorpCache)); } catch (e) {}
+      clearTimeout(zoekDorp.t); zoekDorp.t = setTimeout(() => { vulKeuzes(); toon(false); }, 300); }
+  } catch (e) {}
+}
+let dorpAlleen = (() => { try { return localStorage.getItem("dorpSoort") !== "alles"; } catch (e) { return true; } })();
+function tekenDorpen(basis) {
+  const box = $("#dorpen"); if (box.hidden) return;
+  const lijst = dorpAlleen ? basis.filter(r => r.soorten.some(s => SCHADE.test(s))) : basis;
+  const tel = {}; lijst.forEach(r => { const d = dorpVan(r); tel[d] = (tel[d] || 0) + 1; });
+  const rij = Object.entries(tel).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "nl"));
+  const max = rij[0]?.[1] || 1, gekozenDorp = $("#fDorp").value;
+  const van = new Date($("#fVan").value).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
+  const tot = new Date($("#fTot").value).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
+  box.innerHTML = `<div class="kop"><h2>${dorpAlleen ? "Kapotte / vernielde prullenbakken" : "Alle meldingen"} per dorp</h2>
+      <span class="hint">${esc(van)} t/m ${esc(tot)} · ${lijst.length} meldingen · klik op een dorp om te filteren</span>
+      <div class="seg" role="group" aria-label="Welke meldingen tellen"><button data-ds="schade" aria-pressed="${dorpAlleen}">Alleen schade</button><button data-ds="alles" aria-pressed="${!dorpAlleen}">Alle meldingen</button></div></div>` +
+    (rij.length ? `<ol>${rij.map(([d, n], i) => `<li><button data-dorp="${esc(d)}" aria-pressed="${d === gekozenDorp}" title="${esc(d)}: ${n} melding${n === 1 ? "" : "en"}">
+        <span class="nr">${i + 1}.</span><span class="naam">${esc(d)}</span><span class="balk"><i style="width:${Math.max(4, n / max * 100)}%"></i></span><span class="aantal">${n}</span></button></li>`).join("")}</ol>`
+      : `<div class="leeg">${dorpAlleen ? "Geen schademeldingen in deze periode." : "Geen meldingen in deze periode."}</div>`);
+  box.querySelectorAll("[data-ds]").forEach(b => b.onclick = () => { dorpAlleen = b.dataset.ds === "schade"; try { localStorage.setItem("dorpSoort", b.dataset.ds); } catch (e) {} toon(false); });
+  box.querySelectorAll("[data-dorp]").forEach(b => b.onclick = () => { $("#fDorp").value = $("#fDorp").value === b.dataset.dorp ? "" : b.dataset.dorp; toon(); });
+}
+$("#perDorp").onclick = () => { const aan = $("#dorpen").hidden; $("#dorpen").hidden = !aan; $("#perDorp").setAttribute("aria-pressed", aan);
+  try { localStorage.setItem("perDorp", aan ? "1" : ""); } catch (e) {} toon(false); };
+try { if (localStorage.getItem("perDorp")) { $("#dorpen").hidden = false; $("#perDorp").setAttribute("aria-pressed", true); } } catch (e) {}
 
 /* ---------- tonen ---------- */
 function toon(kaartPassen = true) {
   const soort = $("#fSoort").value, melder = $("#fMelder").value, status = $("#fStatus").value, q = $("#fZoek").value.trim().toLowerCase();
-  gefilterd = rijen.filter(r => (!soort || r.soorten.includes(soort)) && (!melder || r.melder === melder)
+  const dorp = $("#fDorp").value;
+  const basis = rijen.filter(r => (!soort || r.soorten.includes(soort)) && (!melder || r.melder === melder)
     && (!status || (status === "monteur" ? !!r.monteur : (status === "verstuurd") === !!r.verstuurd))
-    && (!q || [r.adres, r.tekst, r.nummer, r.melder, ...r.soorten].join(" ").toLowerCase().includes(q)));
+    && (!q || [r.adres, dorpVan(r), r.tekst, r.nummer, r.melder, ...r.soorten].join(" ").toLowerCase().includes(q)));
+  gefilterd = dorp ? basis.filter(r => dorpVan(r) === dorp) : basis;
+  tekenDorpen(basis);
   const { k, af } = sorteer, w = r => k === "soorten" ? r.soorten.join(",") : k === "ts" ? Date.parse(r.ts) : k === "verstuurd" ? +!!r.verstuurd : String(r[k] || "").toLowerCase();
   gefilterd.sort((a, b) => { const x = w(a), y = w(b); return (x < y ? -1 : x > y ? 1 : 0) * (af ? -1 : 1); });
   document.querySelectorAll("th[data-k]").forEach(th => th.textContent = th.textContent.replace(/ [▲▼]$/, "") + (th.dataset.k === k ? (af ? " ▼" : " ▲") : ""));
@@ -681,9 +753,9 @@ async function zetMonteur(r, naam) {
 
 /* ---------- CSV ---------- */
 $("#csv").onclick = () => {
-  const kol = ["Datum", "Tijd", "Locatie", "Probleem", "Toelichting", "Nummer bak", "Melder", "Status", "Monteur", "Breedtegraad", "Lengtegraad", "Google Maps"];
+  const kol = ["Datum", "Tijd", "Locatie", "Dorp", "Probleem", "Toelichting", "Nummer bak", "Melder", "Status", "Monteur", "Breedtegraad", "Lengtegraad", "Google Maps"];
   const c = v => { const s = String(v ?? ""); return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const regels = gefilterd.map(r => [r.dag, tijd(r.ts), r.adres, r.soorten.join(", "), r.tekst, r.nummer, r.melder, r.verstuurd ? "Verstuurd" : "Open", r.monteur || "",
+  const regels = gefilterd.map(r => [r.dag, tijd(r.ts), r.adres, dorpVan(r), r.soorten.join(", "), r.tekst, r.nummer, r.melder, r.verstuurd ? "Verstuurd" : "Open", r.monteur || "",
     r.lat ?? "", r.lon ?? "", r.lat != null ? mapsUrl(r.lat, r.lon) : ""].map(c).join(";"));
   const blob = new Blob(["﻿" + [kol.join(";"), ...regels].join("\r\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
