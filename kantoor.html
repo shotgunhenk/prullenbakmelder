@@ -88,6 +88,8 @@ td .sub{color:var(--muted);font-size:12px}
 .fout{color:var(--warn);font-weight:600}
 .leaflet-container{font:inherit}
 .st.monteur{color:var(--accent)}
+button.danger{background:var(--warn-soft);color:var(--warn)}
+.acties .duw{margin-left:auto}
 dialog.monteur{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--fg);padding:20px;width:min(460px,calc(100vw - 32px));box-shadow:0 20px 60px rgba(0,0,0,.35)}
 dialog.monteur::backdrop{background:rgba(0,0,0,.45)}
 dialog.monteur h2{font-size:17px;margin:0 0 4px}
@@ -412,10 +414,12 @@ async function toonDetail() {
       <button class="primary" id="dMonteur">🔧 ${r.monteur ? "Opnieuw naar monteur" : "Stuur naar monteur"}</button>
       ${r.monteur ? `<button class="ghost" id="dMonteurWeg">Niet meer bij monteur</button>` : ""}
       <button id="dStatus">${r.verstuurd ? "Markeer als niet verstuurd" : "Markeer als verstuurd"}</button>
+      <button class="danger duw" id="dWeg">🗑 Verwijderen</button>
     </div>`;
   $("#dStatus").onclick = () => zetVerstuurd(r, !r.verstuurd);
   $("#dSluit").onclick = sluitDetail;
   $("#dMonteur").onclick = () => openMonteur(r);
+  $("#dWeg").onclick = () => verwijderMelding(r);
   $("#dMonteurWeg") && ($("#dMonteurWeg").onclick = () => zetMonteur(r, null));
   d.querySelectorAll("#dFotos a").forEach((a, i) => a.onclick = e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); lightbox(r, i); });
   await signUrls(r.fotos.map(f => f.path));
@@ -481,6 +485,22 @@ async function bulkVerstuurd() {
     rijen.filter(r => ids.slice(i, i + 200).includes(r.id)).forEach(r => { r.verstuurd = true; r.updated_at = nu; });
   }
   toon(false);
+}
+
+/* ---------- melding verwijderen (definitief, ook de foto's) ---------- */
+async function verwijderMelding(r) {
+  const wanneer = new Date(r.ts).toLocaleDateString("nl-NL", { day: "numeric", month: "long" }) + " " + tijd(r.ts);
+  if (!confirm(`Melding "${r.adres || "Onbekende plek"}" (${wanneer}) definitief verwijderen?\n\nDe foto's worden ook verwijderd en de melding verdwijnt bij iedereen, ook uit de app. Dit kan niet ongedaan worden gemaakt.`)) return;
+  const b = $("#dWeg"); b.disabled = true; b.textContent = "Bezig…";
+  const { data, error } = await sb.from("meldingen").delete().eq("id", r.id).select("id");
+  if (error || (Array.isArray(data) && !data.length)) {
+    b.disabled = false; b.textContent = "🗑 Verwijderen";
+    alert("Verwijderen mislukt: " + (error ? error.message : "geen rechten of de melding bestaat niet meer.")); return;
+  }
+  const paden = r.fotos.map(f => f.path).filter(Boolean);
+  if (paden.length) { const { error: e } = await sb.storage.from("fotos").remove(paden); if (e) console.warn("foto's niet verwijderd", e); }
+  rijen = rijen.filter(x => x.id !== r.id); laatsteVersie = "";
+  sluitDetail(); vulKeuzes(); toon(false);
 }
 
 /* ---------- stuur naar monteur ---------- */
