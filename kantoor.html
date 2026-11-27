@@ -224,6 +224,28 @@ html[data-theme=dark] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) bri
   </form>
 </dialog>
 
+<dialog class="monteur" id="dDialoog" aria-labelledby="dTitel">
+  <form method="dialog" id="dForm">
+    <h2 id="dTitel">Melding doorsturen</h2>
+    <div class="klein" id="dWat"></div>
+    <div class="stack">
+      <label class="f">Aan (e-mailadres of telefoonnummer)<input id="dAan" list="dEerder" autocomplete="off" placeholder="bv. collega@gemeente.nl of 06 12345678"></label>
+      <datalist id="dEerder"></datalist>
+      <label class="f">Bericht erbij (optioneel)<textarea id="dOpm" placeholder="bv. ter info, of: kunnen jullie dit oppakken?"></textarea></label>
+      <div class="klein">Met de plek, het probleem, een kaartlink en links naar de foto's (7 dagen geldig). Jij verstuurt het zelf vanuit je mail of WhatsApp.</div>
+      <div class="fout" id="dFout" hidden></div>
+      <textarea id="dTekst" readonly hidden style="min-height:160px;font-size:12px"></textarea>
+      <div class="knoppen">
+        <button type="button" class="ghost" id="dKopieer">Tekst kopiëren</button>
+        <span style="flex:1"></span>
+        <button type="button" id="dAnnuleer">Annuleren</button>
+        <button type="button" id="dWa">WhatsApp</button>
+        <button type="button" class="primary" id="dMail">E-mail</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
 <script src="config.js"></script>
 <script src="supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -412,6 +434,7 @@ async function toonDetail() {
     <div class="acties">
       ${heeftLoc ? `<a class="btn" target="_blank" rel="noopener" href="${mapsUrl(r.lat, r.lon)}">Open in Google Maps</a>` : ""}
       <button class="primary" id="dMonteur">🔧 ${r.monteur ? "Opnieuw naar monteur" : "Stuur naar monteur"}</button>
+      <button id="dDoor">↗ Doorsturen</button>
       ${r.monteur ? `<button class="ghost" id="dMonteurWeg">Niet meer bij monteur</button>` : ""}
       <button id="dStatus">${r.verstuurd ? "Markeer als niet verstuurd" : "Markeer als verstuurd"}</button>
       <button class="danger duw" id="dWeg">🗑 Verwijderen</button>
@@ -420,6 +443,7 @@ async function toonDetail() {
   $("#dSluit").onclick = sluitDetail;
   $("#dMonteur").onclick = () => openMonteur(r);
   $("#dWeg").onclick = () => verwijderMelding(r);
+  $("#dDoor").onclick = () => openDoorsturen(r);
   $("#dMonteurWeg") && ($("#dMonteurWeg").onclick = () => zetMonteur(r, null));
   d.querySelectorAll("#dFotos a").forEach((a, i) => a.onclick = e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); lightbox(r, i); });
   await signUrls(r.fotos.map(f => f.path));
@@ -464,7 +488,7 @@ async function toonLbFoto() {
 /* toetsenbord: ↑/↓ door de lijst, Esc sluit */
 document.addEventListener("keydown", e => {
   if (lb) { if (e.key === "Escape") sluitLb(); else if (e.key === "ArrowLeft") blader(-1); else if (e.key === "ArrowRight") blader(1); return; }
-  if ($("#mDialoog").open) return;
+  if ($("#mDialoog").open || $("#dDialoog").open) return;
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) return;
   if (e.key === "Escape" && gekozen) { sluitDetail(); return; }
   if ((e.key === "ArrowDown" || e.key === "ArrowUp") && gefilterd.length) {
@@ -486,6 +510,59 @@ async function bulkVerstuurd() {
   }
   toon(false);
 }
+
+/* ---------- melding doorsturen (naar wie je maar wilt) ---------- */
+function waNummer(t) {
+  let nr = String(t).replace(/[^\d+]/g, "");
+  if (nr.startsWith("+")) nr = nr.slice(1); else if (nr.startsWith("00")) nr = nr.slice(2); else if (nr.startsWith("0")) nr = "31" + nr.slice(1);
+  return nr;
+}
+let dMelding = null;
+const eerderAan = () => { try { return JSON.parse(localStorage.getItem("doorgestuurdAan") || "[]"); } catch (e) { return []; } };
+function onthoudAan(a) { try { localStorage.setItem("doorgestuurdAan", JSON.stringify([a, ...eerderAan().filter(x => x !== a)].slice(0, 15))); } catch (e) {} }
+function openDoorsturen(r) {
+  dMelding = r; $("#dAan").value = ""; $("#dOpm").value = ""; $("#dFout").hidden = true; $("#dTekst").hidden = true;
+  $("#dWat").textContent = `${r.adres || "Onbekende plek"} · ${r.soorten.join(", ") || "melding"}`;
+  $("#dEerder").innerHTML = eerderAan().map(a => `<option value="${esc(a)}"></option>`).join("");
+  $("#dDialoog").showModal(); $("#dAan").focus();
+}
+const dFout = t => { $("#dFout").textContent = t; $("#dFout").hidden = false; };
+const isMail = a => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a);
+const isTel = a => /^[+\d][\d\s\-()]{7,}$/.test(a) && waNummer(a).length >= 10;
+const dTekst = r => berichtVoor(r, "Hierbij een melding van een prullenbak, ter informatie.", $("#dOpm").value.trim());
+$("#dAnnuleer").onclick = () => $("#dDialoog").close();
+$("#dMail").onclick = async () => {
+  const aan = $("#dAan").value.trim();
+  if (!isMail(aan)) return dFout(aan ? "Dit is geen geldig e-mailadres." : "Vul een e-mailadres in.");
+  const b = $("#dMail"); b.disabled = true;
+  try {
+    const r = dMelding, tekst = await dTekst(r);
+    onthoudAan(aan);
+    location.href = `mailto:${encodeURIComponent(aan)}?subject=${encodeURIComponent(`Melding prullenbak: ${r.adres || "onbekende plek"}${r.soorten.length ? " – " + r.soorten.join(", ") : ""}`)}&body=${encodeURIComponent(tekst)}`;
+    $("#dDialoog").close();
+  } finally { b.disabled = false; }
+};
+$("#dWa").onclick = async () => {
+  const aan = $("#dAan").value.trim();
+  if (!isTel(aan)) return dFout(aan ? "Dit is geen geldig telefoonnummer." : "Vul een telefoonnummer in.");
+  const venster = window.open("", "_blank");   // meteen openen, anders blokkeert de browser het
+  const tekst = await dTekst(dMelding), url = `https://wa.me/${waNummer(aan)}?text=${encodeURIComponent(tekst)}`;
+  if (venster) venster.location = url; else window.open(url, "_blank");
+  onthoudAan(aan); $("#dDialoog").close();
+};
+$("#dKopieer").onclick = async () => {
+  // klembord meteen bij de klik aanspreken (anders weigert de browser), de tekst volgt zodra hij klaar is
+  const tekstP = dTekst(dMelding);
+  try {
+    if (window.ClipboardItem && navigator.clipboard?.write)
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": tekstP.then(t => new Blob([t], { type: "text/plain" })) })]);
+    else await navigator.clipboard.writeText(await tekstP);
+    $("#dKopieer").textContent = "✓ Gekopieerd"; setTimeout(() => $("#dKopieer").textContent = "Tekst kopiëren", 2000);
+  } catch (e) {   // klembord geblokkeerd: tekst tonen en selecteren, dan kan het met Ctrl+C / Cmd+C
+    const vak = $("#dTekst"); vak.value = await tekstP; vak.hidden = false; vak.focus(); vak.select();
+    dFout("Kopiëren lukte niet automatisch. De tekst staat hieronder geselecteerd: druk op Ctrl+C (Mac: Cmd+C).");
+  }
+};
 
 /* ---------- melding verwijderen (definitief, ook de foto's) ---------- */
 async function verwijderMelding(r) {
@@ -544,13 +621,12 @@ async function monteurVoorVersturen() {
   monteurs.push(data); vulMonteurKeuze(data.id); return data;
 }
 function toonFout(t) { $("#mFout").textContent = t; $("#mFout").hidden = false; }
-async function berichtVoor(r) {
+async function berichtVoor(r, intro = "Wil je deze prullenbak bekijken / repareren?", opm = $("#mOpm").value.trim()) {
   const heeftLoc = r.lat != null && r.lon != null, paden = r.fotos.map(f => f.path).filter(Boolean);
   let links = [];
   if (paden.length) { try { const { data } = await sb.storage.from("fotos").createSignedUrls(paden, 7 * 24 * 3600); links = (data || []).map(d => d.signedUrl).filter(Boolean); } catch (e) {} }
-  const opm = $("#mOpm").value.trim();
   return [
-    "Hallo,", "", "Wil je deze prullenbak bekijken / repareren?", "",
+    "Hallo,", "", intro, "",
     `Plek: ${r.adres || "onbekend"}`,
     r.soorten.length ? `Probleem: ${r.soorten.join(", ")}` : null,
     r.tekst ? `Toelichting: ${r.tekst}` : null,
@@ -578,8 +654,7 @@ async function verstuurNaarMonteur(via) {
     if (via === "mail") {
       location.href = `mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent(`Prullenbak: ${r.adres || "melding"}${r.soorten.length ? " – " + r.soorten.join(", ") : ""}`)}&body=${encodeURIComponent(tekst)}`;
     } else {
-      let nr = m.telefoon.replace(/[^\d+]/g, ""); if (nr.startsWith("+")) nr = nr.slice(1); else if (nr.startsWith("00")) nr = nr.slice(2); else if (nr.startsWith("0")) nr = "31" + nr.slice(1);
-      const url = `https://wa.me/${nr}?text=${encodeURIComponent(tekst)}`;
+      const url = `https://wa.me/${waNummer(m.telefoon)}?text=${encodeURIComponent(tekst)}`;
       if (venster) venster.location = url; else window.open(url, "_blank");
     }
     try { localStorage.setItem("laatsteMonteur", m.id); } catch (e) {}
