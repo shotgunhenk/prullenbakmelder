@@ -7,7 +7,9 @@
 // Benodigde secrets (Supabase → Edge Functions → Secrets):
 //   RESEND_API_KEY   sleutel van resend.com
 //   DAGMAIL_AAN      e-mailadres van de ontvanger
-//   DAGMAIL_GEHEIM   willekeurige tekst; dezelfde staat in de cron-opdracht (dagmail-setup.sql)
+//   DAGMAIL_GEHEIM   willekeurige tekst; alleen nodig voor ?test=1 en ?dag=… (header x-dagmail-geheim)
+// De gewone dagmail heeft geen geheim nodig: hij gaat alleen om 18:00 en maximaal één keer per dag
+// (tabel dagmail_log, zie dagmail-setup.sql).
 // Optioneel: DAGMAIL_UUR (standaard 18), DAGMAIL_VAN (standaard "Prullenbakmelder <onboarding@resend.dev>")
 // SUPABASE_URL en SUPABASE_SERVICE_ROLE_KEY zet Supabase zelf.
 
@@ -113,10 +115,10 @@ function base64(bytes) {
 
 Deno.serve(async req => {
   const url = new URL(req.url);
-  if (req.headers.get("x-dagmail-geheim") !== env("DAGMAIL_GEHEIM") || !env("DAGMAIL_GEHEIM"))
-    return new Response("niet toegestaan", { status: 401 });
-  // ?test=1 stuurt meteen (handig om te proberen), ?dag=2026-11-24 voor een andere dag
-  const test = url.searchParams.has("test");
+  // ?test=1 stuurt meteen (handig om te proberen), ?dag=2026-11-24 voor een andere dag: alleen met het geheim
+  const test = url.searchParams.has("test") || url.searchParams.has("dag");
+  const geheimOk = !!env("DAGMAIL_GEHEIM") && req.headers.get("x-dagmail-geheim") === env("DAGMAIL_GEHEIM");
+  if (test && !geheimOk) return new Response("niet toegestaan", { status: 401 });
   if (!test && uurNu() !== +env("DAGMAIL_UUR", "18")) return Response.json({ overgeslagen: "niet het juiste uur", uur: uurNu() });
 
   const dag = url.searchParams.get("dag") || dagKey(new Date());
@@ -125,7 +127,14 @@ Deno.serve(async req => {
   const { data, error } = await sb.from("meldingen").select("*").eq("dag", dag).order("ts");
   if (error) return Response.json({ fout: error.message }, { status: 500 });
   if (!data.length) return Response.json({ dag, meldingen: 0, verstuurd: false });   // geen meldingen = geen mail
+  // gewone dagmail maar één keer per dag (ook als iemand de functie vaker aanroept)
+  if (!test) {
+    const { error: e } = await sb.from("dagmail_log").insert({ dag });
+    if (e) return Response.json({ overgeslagen: "vandaag al verstuurd", dag });
+  }
+  const vergeet = () => test ? null : sb.from("dagmail_log").delete().eq("dag", dag);   // bij een fout later opnieuw kunnen
 
+  try {
   const lijst = [];
   for (const r of data) {
     const fotos = [];
@@ -150,6 +159,7 @@ Deno.serve(async req => {
     }),
   });
   const antwoord = await res.text();
-  if (!res.ok) return Response.json({ fout: "mail niet verstuurd", resend: antwoord }, { status: 502 });
+  if (!res.ok) { await vergeet(); return Response.json({ fout: "mail niet verstuurd", resend: antwoord }, { status: 502 }); }
   return Response.json({ dag, meldingen: lijst.length, pdfKb: Math.round(pdf.length / 1024), verstuurd: true });
+  } catch (e) { await vergeet(); return Response.json({ fout: String(e?.message || e) }, { status: 500 }); }
 });
