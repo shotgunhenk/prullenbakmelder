@@ -11,6 +11,8 @@ create table if not exists public.dagmail_log (
   verstuurd_at timestamptz not null default now()
 );
 alter table public.dagmail_log enable row level security;   -- geen policies: alleen de functie (service role) mag erbij
+grant select on public.meldingen to service_role;                     -- standaardrechten ontbreken in dit project
+grant select, insert, delete on public.dagmail_log to service_role;
 
 -- oude versie van de taak weghalen (mag ook als die nog niet bestaat)
 select cron.unschedule(jobid) from cron.job where jobname = 'dagmail';
