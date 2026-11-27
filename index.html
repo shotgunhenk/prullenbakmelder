@@ -367,35 +367,6 @@ $("#syncStatus").onclick = () => sessie ? sync() : toon("login");
 async function blobVan(src) { return (await fetch(src)).blob(); }
 function naarDataUrl(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); }); }
 
-/* ---------- eenmalige import (import.json in de app-map) ---------- */
-let importKlaar = false;
-async function importeer() {
-  if (importKlaar) return; importKlaar = true;
-  let lijst; try { const r = await fetch("import.json", { cache: "no-store" }); if (!r.ok) return; lijst = await r.json(); } catch (e) { return; }
-  let gedaan = []; try { gedaan = JSON.parse(localStorage.getItem("importGedaan") || "[]"); } catch (e) {}
-  const lokaal = new Set((await DB.all()).map(m => m.id));
-  let nieuw = lijst.filter(x => !gedaan.includes(x.id) && !lokaal.has(x.id));
-  if (!nieuw.length) return;
-  if (sb && sessie) { // staat al in de cloud (bv. via een andere telefoon)? dan niet nog eens
-    const { data, error } = await sb.from("meldingen").select("id").in("id", nieuw.map(x => x.id));
-    if (error) { importKlaar = false; return; }
-    const al = new Set(data.map(r => r.id)); nieuw.filter(x => al.has(x.id)).forEach(x => gedaan.push(x.id)); nieuw = nieuw.filter(x => !al.has(x.id));
-  }
-  for (const x of nieuw) {
-    try {
-      const fotos = [];
-      for (const f of x.fotos || []) fotos.push({ src: await naarDataUrl(await blobVan(f.src)), w: f.w, h: f.h });
-      const ts = Date.parse(x.ts);
-      await DB.put({ id: x.id, ts, dag: x.dag, soorten: x.soorten || [], tekst: x.tekst || "", nummer: x.nummer || "", adres: x.adres || "",
-        lat: x.lat ?? null, lon: x.lon ?? null, acc: null, verstuurd: false, user_id: mijnId(), melder: x.melder || mijnNaam(),
-        fotos, dirty: true, updated: Date.now() });
-      gedaan.push(x.id);
-    } catch (e) { importKlaar = false; }
-  }
-  try { localStorage.setItem("importGedaan", JSON.stringify(gedaan)); } catch (e) {}
-  await render();
-}
-
 async function zetPad(id, src, path) {
   const nu = await DB.get(id); if (!nu) return;
   const f = nu.fotos.find(x => !x.path && x.src === src); if (f) { f.path = path; await DB.put(nu); }
@@ -414,7 +385,6 @@ async function sync() {
   if (syncBezig) { syncNogmaals = true; return; }
   syncBezig = true; syncFout = ""; toonStatus();
   try {
-    await importeer();
     // 1. eigen wijzigingen omhoog
     for (const m of (await DB.all()).filter(x => x.dirty)) {
       const weg = (m.oudePaden || []).slice();
@@ -954,7 +924,7 @@ $("#btnOpruimen").onclick = async () => {
 /* ---------- start ---------- */
 (async () => {
   toon("lijst"); await initAuth(); await render();
-  if (!sb) importeer(); else if (!sessie) toon("login"); else sync();
+  if (sb && !sessie) toon("login"); else if (sb) sync();
   if (!sb || sessie) {   // app was gesloten tijdens een nieuwe melding? dan daar verder
     const c = await heeftConcept();
     if (c && !huidig) { openForm(null, c); toast("Je onafgemaakte melding is teruggezet"); }
