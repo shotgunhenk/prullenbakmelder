@@ -759,7 +759,7 @@ $("#btnMaakPdf").onclick = async () => {
     const d = $("#rapDatum").value;
     const lijst = rapLijst();
     for (const m of lijst) if (m.fotos.some(f => !f.src)) await laadFotos(m);
-    const blob = maakPdf(d, lijst);
+    const blob = maakPdf(d, lijst, await laadLogo());
     const naam = `meldingen-prullenbakken-${d}.pdf`;
     pdfBestand = { blob, naam, d, ids: lijst.map(m => m.id) };
     $("#pdfNaam").textContent = naam;
@@ -771,19 +771,26 @@ $("#btnMaakPdf").onclick = async () => {
   b.disabled = false; b.textContent = "PDF opnieuw maken";
 };
 
-function maakPdf(dag, lijst) {
+let logoCache;
+async function laadLogo() {   // AREA-logo bovenaan de PDF (zit in de app-cache, werkt dus ook offline)
+  if (logoCache) return logoCache;
+  try { const r = await fetch("logo-area.jpg"); if (r.ok) logoCache = await naarDataUrl(await r.blob()); } catch (e) {}
+  return logoCache || null;
+}
+function maakPdf(dag, lijst, logo) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const W = 210, H = 297, M = 15, CW = W - 2 * M;
-  const groen = [31, 95, 63], grijs = [93, 107, 98];
-  // kop
-  doc.setFillColor(...groen); doc.rect(0, 0, W, 30, "F");
-  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-  doc.text("Meldingen prullenbakken", M, 14);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(11);
-  const dl = dagLang(dag); doc.text(dl.charAt(0).toUpperCase() + dl.slice(1), M, 22);
-  doc.text(`${lijst.length} melding${lijst.length === 1 ? "" : "en"}`, W - M, 22, { align: "right" });
-  let y = 38;
+  const groen = [0, 130, 49], roze = [197, 1, 75], grijs = [93, 107, 98];   // huisstijlkleuren AREA
+  const dl = dagLang(dag);
+  if (logo) { try { doc.addImage(logo, "JPEG", M, 9, 40, 40 * 288 / 646); } catch (e) { console.warn("logo", e); } }
+  doc.setTextColor(...groen); doc.setFont("helvetica", "bold"); doc.setFontSize(17);
+  doc.text("Meldingen prullenbakken", W - M, 15, { align: "right" });
+  doc.setTextColor(0); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+  doc.text(dl.charAt(0).toUpperCase() + dl.slice(1), W - M, 21.5, { align: "right" });
+  doc.setTextColor(...grijs); doc.text(`${lijst.length} melding${lijst.length === 1 ? "" : "en"}`, W - M, 27, { align: "right" });
+  doc.setFillColor(...groen); doc.rect(0, 32, W, 2.2, "F"); doc.setFillColor(...roze); doc.rect(M, 32, 30, 2.2, "F");
+  let y = 43;
   doc.setTextColor(0); doc.setFontSize(10);
   const melders = [...new Set(lijst.map(m => m.melder || inst.naam).filter(Boolean))];
   if (melders.length) { doc.setTextColor(...grijs); const r = doc.splitTextToSize(`Gemeld door: ${melders.join(", ")}`, CW); doc.text(r, M, y); y += r.length * 4.6 + 1.5; }
@@ -837,7 +844,7 @@ function maakPdf(dag, lijst) {
   });
   const tot = doc.getNumberOfPages();
   for (let p = 1; p <= tot; p++) { doc.setPage(p); doc.setFontSize(8); doc.setTextColor(...grijs);
-    doc.text(`Pagina ${p} van ${tot}`, W - M, H - 8, { align: "right" }); }
+    doc.text(`Pagina ${p} van ${tot}`, W - M, H - 8, { align: "right" }); doc.text("AREA · Meldingen prullenbakken", M, H - 8); }
   return doc.output("blob");
 }
 

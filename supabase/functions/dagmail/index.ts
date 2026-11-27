@@ -1,16 +1,16 @@
 // @ts-nocheck  (gewone JavaScript; geen typecontrole nodig)
 // Prullenbakmelder – dagmail
-// Supabase Edge Function: stuurt elke dag om 18:00 (Nederlandse tijd) een mail met de meldingen van die dag
+// Supabase Edge Function: stuurt elke dag om 15:00 (Nederlandse tijd) een mail met de meldingen van die dag
 // als PDF-bijlage (zelfde opmaak als het dagrapport in de app). Wordt elk uur aangeroepen door Supabase Cron
-// en doet alleen iets om 18:00 Amsterdam-tijd (zo klopt het ook na de overgang zomer-/wintertijd).
+// en doet alleen iets om 15:00 Amsterdam-tijd (zo klopt het ook na de overgang zomer-/wintertijd).
 //
 // Benodigde secrets (Supabase → Edge Functions → Secrets):
 //   RESEND_API_KEY   sleutel van resend.com
 //   DAGMAIL_AAN      e-mailadres van de ontvanger
 //   DAGMAIL_GEHEIM   willekeurige tekst; alleen nodig voor ?test=1 en ?dag=… (header x-dagmail-geheim)
-// De gewone dagmail heeft geen geheim nodig: hij gaat alleen om 18:00 en maximaal één keer per dag
+// De gewone dagmail heeft geen geheim nodig: hij gaat alleen om 15:00 en maximaal één keer per dag
 // (tabel dagmail_log, zie dagmail-setup.sql).
-// Optioneel: DAGMAIL_UUR (standaard 18), DAGMAIL_VAN (standaard "Prullenbakmelder <onboarding@resend.dev>")
+// Optioneel: DAGMAIL_UUR (standaard 15), DAGMAIL_VAN (standaard "Prullenbakmelder <onboarding@resend.dev>")
 // SUPABASE_URL en SUPABASE_SERVICE_ROLE_KEY zet Supabase zelf.
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -30,17 +30,19 @@ const mapsUrl = (lat, lon) => `https://www.google.com/maps/search/?api=1&query=$
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /* PDF: zelfde opbouw als in de app. lijst[i].fotos = [{ data: Uint8Array, w, h }] */
-export function maakPdf(jsPDF, dag, lijst) {
+export function maakPdf(jsPDF, dag, lijst, logo) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const W = 210, H = 297, M = 15, CW = W - 2 * M;
-  const groen = [31, 95, 63], grijs = [93, 107, 98];
-  doc.setFillColor(...groen); doc.rect(0, 0, W, 30, "F");
-  doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-  doc.text("Meldingen prullenbakken", M, 14);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(11);
-  const dl = dagLang(dag); doc.text(dl.charAt(0).toUpperCase() + dl.slice(1), M, 22);
-  doc.text(`${lijst.length} melding${lijst.length === 1 ? "" : "en"}`, W - M, 22, { align: "right" });
-  let y = 38;
+  const groen = [0, 130, 49], roze = [197, 1, 75], grijs = [93, 107, 98];   // huisstijlkleuren AREA
+  const dl = dagLang(dag);
+  if (logo) { try { doc.addImage(logo, "JPEG", M, 9, 40, 40 * 288 / 646); } catch (e) { console.warn("logo", e); } }
+  doc.setTextColor(...groen); doc.setFont("helvetica", "bold"); doc.setFontSize(17);
+  doc.text("Meldingen prullenbakken", W - M, 15, { align: "right" });
+  doc.setTextColor(0); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+  doc.text(dl.charAt(0).toUpperCase() + dl.slice(1), W - M, 21.5, { align: "right" });
+  doc.setTextColor(...grijs); doc.text(`${lijst.length} melding${lijst.length === 1 ? "" : "en"}`, W - M, 27, { align: "right" });
+  doc.setFillColor(...groen); doc.rect(0, 32, W, 2.2, "F"); doc.setFillColor(...roze); doc.rect(M, 32, 30, 2.2, "F");
+  let y = 43;
   doc.setFontSize(10);
   const melders = [...new Set(lijst.map(m => m.melder).filter(Boolean))];
   if (melders.length) { doc.setTextColor(...grijs); const r = doc.splitTextToSize(`Gemeld door: ${melders.join(", ")}`, CW); doc.text(r, M, y); y += r.length * 4.6 + 1.5; }
@@ -91,7 +93,7 @@ export function maakPdf(jsPDF, dag, lijst) {
   });
   const tot = doc.getNumberOfPages();
   for (let p = 1; p <= tot; p++) { doc.setPage(p); doc.setFontSize(8); doc.setTextColor(...grijs);
-    doc.text(`Pagina ${p} van ${tot}`, W - M, H - 8, { align: "right" }); }
+    doc.text(`Pagina ${p} van ${tot}`, W - M, H - 8, { align: "right" }); doc.text("AREA · Meldingen prullenbakken", M, H - 8); }
   return new Uint8Array(doc.output("arraybuffer"));
 }
 
@@ -119,7 +121,7 @@ Deno.serve(async req => {
   const test = url.searchParams.has("test") || url.searchParams.has("dag");
   const geheimOk = !!env("DAGMAIL_GEHEIM") && req.headers.get("x-dagmail-geheim") === env("DAGMAIL_GEHEIM");
   if (test && !geheimOk) return new Response("niet toegestaan", { status: 401 });
-  if (!test && uurNu() !== +env("DAGMAIL_UUR", "18")) return Response.json({ overgeslagen: "niet het juiste uur", uur: uurNu() });
+  if (!test && uurNu() !== +env("DAGMAIL_UUR", "15")) return Response.json({ overgeslagen: "niet het juiste uur", uur: uurNu() });
 
   const dag = url.searchParams.get("dag") || dagKey(new Date());
   const sb = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });
@@ -146,7 +148,9 @@ Deno.serve(async req => {
     lijst.push({ ...r, soorten: r.soorten || [], ts: Date.parse(r.ts), fotos });
   }
 
-  const pdf = maakPdf(jsPDF, dag, lijst);
+  let logo = null;   // AREA-logo, staat naast de app op GitHub Pages
+  try { const r = await fetch(env("DAGMAIL_LOGO", "https://shotgunhenk.github.io/prullenbakmelder/logo-area.jpg")); if (r.ok) logo = new Uint8Array(await r.arrayBuffer()); } catch (e) {}
+  const pdf = maakPdf(jsPDF, dag, lijst, logo);
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${env("RESEND_API_KEY")}`, "Content-Type": "application/json" },

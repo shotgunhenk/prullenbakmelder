@@ -17,9 +17,9 @@ grant select, insert, delete on public.dagmail_log to service_role;
 -- oude versie van de taak weghalen (mag ook als die nog niet bestaat)
 select cron.unschedule(jobid) from cron.job where jobname = 'dagmail';
 
--- om 16:00 en 17:00 UTC aanroepen; de functie verstuurt alleen om 18:00 Nederlandse tijd
+-- om 13:00 en 14:00 UTC aanroepen; de functie verstuurt alleen om 15:00 Nederlandse tijd
 -- (zo klopt het in zomer- én wintertijd). Geen meldingen op een dag = geen mail.
-select cron.schedule('dagmail', '0 16,17 * * *', $$
+select cron.schedule('dagmail', '0 13,14 * * *', $$
   select net.http_post(
     url := 'https://lbaxybsosehpdhakgtel.supabase.co/functions/v1/dagmail',
     headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxiYXh5YnNvc2VocGRoYWtndGVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU1MzQwMjEsImV4cCI6MjExMTExMDAyMX0.LVaRWCY95i-x6FP7n3MDXqEFpSJNALGJ_8Vc43u9pTI'),
