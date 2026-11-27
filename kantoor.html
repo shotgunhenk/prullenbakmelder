@@ -338,7 +338,7 @@ async function laad(stil = false) {
   $("#verversen").disabled = false;
   if (nr !== laadNr) return;
   if (error) { if (!stil) $("#stats").innerHTML = `<span class="fout">Ophalen mislukt: ${esc(error.message || error)}</span>`; return; }
-  const versie = data.map(r => r.id + r.updated_at).sort().join("|");
+  const versie = data.map(r => [r.id, r.updated_at, r.verstuurd, r.monteur, r.monteur_at].join("/")).sort().join("|");
   if (stil && versie === laatsteVersie) return;
   laatsteVersie = versie;
   rijen = data.map(r => ({ ...r, soorten: r.soorten || [], fotos: r.fotos || [] }));
@@ -371,8 +371,12 @@ function dorpVan(r) {
   if (dorpCache[k]) return dorpCache[k];
   zoekDorp(k, r.lat, r.lon); return "Onbekend";
 }
-async function zoekDorp(k, lat, lon) {
+let dorpRij = Promise.resolve();
+function zoekDorp(k, lat, lon) {
   if (dorpBezig.has(k)) return; dorpBezig.add(k);
+  dorpRij = dorpRij.then(() => haalDorp(k, lat, lon));
+}
+async function haalDorp(k, lat, lon) {
   try {
     const res = await fetch(`https://api.pdok.nl/bzk/locatieserver/search/v3_1/reverse?lat=${lat}&lon=${lon}&rows=1&type=adres&fl=woonplaatsnaam,weergavenaam`);
     const doc = (await res.json())?.response?.docs?.[0], w = doc?.woonplaatsnaam || dorpUitAdres(doc?.weergavenaam);
@@ -529,7 +533,8 @@ async function zetVerstuurd(r, waarde) {
   const nu = new Date().toISOString();
   const { error } = await sb.from("meldingen").update({ verstuurd: waarde, updated_at: nu }).eq("id", r.id);
   if (error) { b.disabled = false; alert("Opslaan mislukt: " + error.message); return; }
-  r.verstuurd = waarde; r.updated_at = nu; toon(false);
+  for (const x of new Set([r, rijen.find(y => y.id === r.id)])) if (x) { x.verstuurd = waarde; x.updated_at = nu; }
+  toon(false);
 }
 
 function sluitDetail() {
@@ -748,7 +753,8 @@ async function zetMonteur(r, naam) {
   const nu = new Date().toISOString();
   const { error } = await sb.from("meldingen").update({ monteur: naam, monteur_at: naam ? nu : null }).eq("id", r.id);
   if (error) { alert("Opslaan mislukt: " + error.message); return; }
-  r.monteur = naam; r.monteur_at = naam ? nu : null; toon(false);
+  for (const x of new Set([r, rijen.find(y => y.id === r.id)])) if (x) { x.monteur = naam; x.monteur_at = naam ? nu : null; }
+  toon(false);
 }
 
 /* ---------- CSV ---------- */

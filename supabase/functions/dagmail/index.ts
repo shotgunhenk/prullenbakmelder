@@ -24,6 +24,8 @@ const deel = (d, opt) => new Intl.DateTimeFormat("nl-NL", { timeZone: TZ, ...opt
 const dagKey = d => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 const uurNu = () => +deel(new Date(), { hour: "2-digit", hourCycle: "h23" });
 const tijd = ts => deel(new Date(ts), { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+// tijd, met datum ervoor als de melding van een andere dag is (bv. gisteren na 15:00)
+const wanneer = (m, dag) => (m.dag !== dag ? new Date(m.ts).toLocaleDateString("nl-NL", { timeZone: TZ, day: "numeric", month: "short" }) + " " : "") + tijd(m.ts);
 const dagLang = key => { const [y, m, d] = key.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("nl-NL", { timeZone: TZ, weekday: "long", day: "numeric", month: "long", year: "numeric" }); };
 const mapsUrl = (lat, lon) => `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
@@ -50,7 +52,7 @@ export function maakPdf(jsPDF, dag, lijst, logo) {
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
   lijst.forEach((m, i) => {
     if (y > H - 20) { doc.addPage(); y = 20; }
-    const r = `${i + 1}.  ${tijd(m.ts)}  ${m.adres || "onbekende plek"}${m.soorten.length ? " — " + m.soorten.join(", ") : ""}${m.verstuurd ? "  (al verstuurd)" : ""}`;
+    const r = `${i + 1}.  ${wanneer(m, dag)}  ${m.adres || "onbekende plek"}${m.soorten.length ? " — " + m.soorten.join(", ") : ""}${m.verstuurd ? "  (al verstuurd)" : ""}`;
     const regels = doc.splitTextToSize(r, CW); doc.text(regels, M, y); y += regels.length * 4.4 + 1;
   });
   lijst.forEach((m, i) => {
@@ -99,13 +101,13 @@ export function maakPdf(jsPDF, dag, lijst, logo) {
 
 /* korte samenvatting in de mail zelf */
 export function maakHtml(dag, lijst) {
-  const rij = m => `<tr><td style="padding:6px 10px;border-bottom:1px solid #ddd;white-space:nowrap">${tijd(m.ts)}</td>
+  const rij = m => `<tr><td style="padding:6px 10px;border-bottom:1px solid #ddd;white-space:nowrap">${wanneer(m, dag)}</td>
     <td style="padding:6px 10px;border-bottom:1px solid #ddd"><b>${esc(m.adres || "Onbekende plek")}</b>${m.tekst ? `<br><span style="color:#5d6b62">${esc(m.tekst)}</span>` : ""}</td>
     <td style="padding:6px 10px;border-bottom:1px solid #ddd">${esc(m.soorten.join(", "))}</td>
     <td style="padding:6px 10px;border-bottom:1px solid #ddd">${esc(m.melder)}</td></tr>`;
   return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111a14">
     <h2 style="color:#008231;margin:0 0 4px">Meldingen prullenbakken</h2>
-    <p style="margin:0 0 14px">${esc(dagLang(dag))}: <b>${lijst.length} melding${lijst.length === 1 ? "" : "en"}</b>. Het volledige rapport met foto's en kaartlinks zit als PDF in de bijlage.</p>
+    <p style="margin:0 0 14px">${esc(dagLang(dag))} (sinds de vorige mail): <b>${lijst.length} melding${lijst.length === 1 ? "" : "en"}</b>. Het volledige rapport met foto's en kaartlinks zit als PDF in de bijlage.</p>
     <table style="border-collapse:collapse;font-size:13px"><tr style="text-align:left;color:#5d6b62"><th style="padding:6px 10px">Tijd</th><th style="padding:6px 10px">Plek</th><th style="padding:6px 10px">Probleem</th><th style="padding:6px 10px">Melder</th></tr>
     ${lijst.map(rij).join("")}</table></div>`;
 }
@@ -126,7 +128,12 @@ Deno.serve(async req => {
   const dag = url.searchParams.get("dag") || dagKey(new Date());
   const sb = createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });
 
-  const { data, error } = await sb.from("meldingen").select("*").eq("dag", dag).order("ts");
+  // gewone dagmail: alles wat sinds de vorige mail (gisteren 15:00) binnenkwam, dus ook meldingen van na 15:00
+  // en meldingen die later zijn geüpload (telefoon was offline). Met ?dag=… : alleen die ene dag.
+  const tot = new Date(Math.floor(Date.now() / 3600e3) * 3600e3), van = new Date(tot.getTime() - 24 * 3600e3);
+  const vraag = sb.from("meldingen").select("*");
+  const { data, error } = await (url.searchParams.has("dag") ? vraag.eq("dag", dag)
+    : vraag.gte("created_at", van.toISOString()).lt("created_at", tot.toISOString())).order("ts");
   if (error) return Response.json({ fout: error.message }, { status: 500 });
   if (!data.length) return Response.json({ dag, meldingen: 0, verstuurd: false });   // geen meldingen = geen mail
   // gewone dagmail maar één keer per dag (ook als iemand de functie vaker aanroept)
