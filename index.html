@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Prullenbakmelder</title>
-<meta name="theme-color" content="#1f5f3f">
+<meta name="theme-color" content="#008231">
+<script>/* gekozen thema meteen toepassen, vóór het tekenen */try{const t=localStorage.getItem("thema");if(t==="licht"||t==="donker")document.documentElement.dataset.theme=t==="licht"?"light":"dark"}catch(e){}</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Prullenbak">
@@ -12,18 +13,23 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
 <style>
-/* Werkapp voor buiten: grote knoppen, één kolom, groen van de gemeentelijke bak */
+/* Werkapp voor buiten: grote knoppen, één kolom, in de kleuren van AREA (groen, donkergroen, magenta, limoen) */
 :root{
-  --bg:#f3f5f2; --card:#ffffff; --fg:#17231c; --muted:#5d6b62; --line:#d8dfd9;
-  --accent:#1f5f3f; --accent-fg:#ffffff; --accent-soft:#e1ede5;
-  --warn:#a33b20; --warn-soft:#f8e4dd; --ok:#2d7a4a;
+  --bg:#f3f7f2; --card:#ffffff; --fg:#111a14; --muted:#56645b; --line:#d9e3da;
+  --accent:#008231; --accent-fg:#ffffff; --accent-soft:#e2f2e5; --brand2:#c5014b;
+  --warn:#c5014b; --warn-soft:#fbe6ee; --ok:#008231; --geel:#c7d300;
   --radius:14px;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color-scheme:light;
 }
-@media (prefers-color-scheme:dark){:root{
-  --bg:#101612; --card:#18211b; --fg:#e6ede8; --muted:#97a69c; --line:#2b372f;
-  --accent:#4fae7a; --accent-fg:#0b130e; --accent-soft:#1d3226;
-  --warn:#ef8a6b; --warn-soft:#3a201a; --ok:#6cc792; color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#0d120f; --card:#161d18; --fg:#e9f0ea; --muted:#9aa89f; --line:#29342c;
+  --accent:#4cb03a; --accent-fg:#07110a; --accent-soft:#17301b; --brand2:#ff4f8b;
+  --warn:#ff6b9c; --warn-soft:#3b1426; --ok:#6cc56a; --geel:#d4df1f; color-scheme:dark}}
+:root[data-theme=dark]{
+  --bg:#0d120f; --card:#161d18; --fg:#e9f0ea; --muted:#9aa89f; --line:#29342c;
+  --accent:#4cb03a; --accent-fg:#07110a; --accent-soft:#17301b; --brand2:#ff4f8b;
+  --warn:#ff6b9c; --warn-soft:#3b1426; --ok:#6cc56a; --geel:#d4df1f; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font:16px/1.45 var(--font);-webkit-text-size-adjust:100%;
@@ -72,6 +78,14 @@ textarea{min-height:84px;resize:vertical}
 .bar button{flex:1;white-space:nowrap}
 .bar button.primary{flex:1.6}
 [hidden],.view[hidden]{display:none!important}
+.merk{display:flex;align-items:center;gap:10px}
+.merk svg{width:40px;height:28px;flex:none}
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;background:transparent;min-height:40px;padding:8px 6px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.tag{border:1px solid transparent}
+.big{color:var(--accent)}
+#v-inst>.card,#v-inst>.note{margin:0 0 12px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:15px;z-index:9;max-width:90vw;text-align:center}
 .note{font-size:14px;color:var(--muted)}
 .big{font-size:40px;font-weight:700;line-height:1}
@@ -101,7 +115,7 @@ textarea{min-height:84px;resize:vertical}
 <!-- ===== LIJST ===== -->
 <section class="view" id="v-lijst">
   <header>
-    <div><h1>Prullenbakmelder</h1><div class="sub" id="vandaagTxt"></div>
+    <div><div class="merk"><svg viewBox="0 0 40 28" aria-hidden="true"><polygon points="10,0 20,10 10,20 0,10" fill="#ce0858"/><polygon points="30,0 40,10 30,20 20,10" fill="#008231"/><polygon points="20,10 30,20 10,20" fill="#c7d300"/><polygon points="10,20 30,20 20,28" fill="#46a335"/></svg><h1>Prullenbakmelder</h1></div><div class="sub" id="vandaagTxt"></div>
       <button class="status" id="syncStatus" hidden></button></div>
     <button class="ghost" id="btnInst" aria-label="Instellingen">Instellingen</button>
   </header>
@@ -221,6 +235,13 @@ textarea{min-height:84px;resize:vertical}
       <button class="danger" id="btnUitloggen">Uitloggen</button>
     </div>
     <a class="btn" href="kantoor.html" style="text-align:center;text-decoration:none">🖥 Kantooroverzicht (tabel + kaart)</a>
+  </div>
+  <div class="card stack">
+    <div><label id="themaLabel">Weergave</label>
+      <div class="seg" role="group" aria-labelledby="themaLabel">
+        <button type="button" data-thema="auto">Automatisch</button><button type="button" data-thema="licht">Licht</button><button type="button" data-thema="donker">Donker</button>
+      </div>
+      <div class="note" style="margin-top:6px">Automatisch volgt de instelling van je telefoon.</div></div>
   </div>
   <div class="card stack">
     <div><label for="sNaam">Jouw naam (komt op de PDF)</label><input type="text" id="sNaam"></div>
@@ -878,6 +899,26 @@ function download() {
 }
 $("#btnDownload").onclick = () => pdfBestand && download();
 $("#btnKopieer").onclick = async () => { try { await navigator.clipboard.writeText(inst.mail); toast("E-mailadres gekopieerd"); } catch (e) { toast(inst.mail); } };
+
+/* ---------- weergave (licht / donker) ---------- */
+function zetThema(t) {
+  try { t === "auto" ? localStorage.removeItem("thema") : localStorage.setItem("thema", t); } catch (e) {}
+  if (t === "licht") document.documentElement.dataset.theme = "light";
+  else if (t === "donker") document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
+  toonThema();
+}
+function huidigThema() { try { return localStorage.getItem("thema") || "auto"; } catch (e) { return "auto"; } }
+function toonThema() {
+  const t = huidigThema();
+  document.querySelectorAll("[data-thema]").forEach(b => b.setAttribute("aria-pressed", b.dataset.thema === t));
+  // kleur van de statusbalk mee laten gaan
+  const donker = t === "donker" || (t === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.querySelector('meta[name="theme-color"]').content = donker ? "#0d120f" : "#008231";
+}
+document.querySelectorAll("[data-thema]").forEach(b => b.onclick = () => zetThema(b.dataset.thema));
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", toonThema);
+toonThema();
 
 /* ---------- instellingen ---------- */
 $("#btnInst").onclick = () => {

@@ -4,21 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Prullenbakmelder · Kantoor</title>
-<meta name="theme-color" content="#1f5f3f">
+<meta name="theme-color" content="#008231">
+<script>try{const t=localStorage.getItem("thema");if(t==="licht"||t==="donker")document.documentElement.dataset.theme=t==="licht"?"light":"dark"}catch(e){}</script>
 <link rel="icon" href="icon-192.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-/* Kantoorweergave: overzicht van alle meldingen van het team, tabel + kaart */
+/* Kantoorweergave: overzicht van alle meldingen van het team, tabel + kaart — kleuren van AREA */
 :root{
-  --bg:#f3f5f2; --card:#ffffff; --fg:#17231c; --muted:#5d6b62; --line:#d8dfd9;
-  --accent:#1f5f3f; --accent-fg:#ffffff; --accent-soft:#e1ede5; --hover:#f0f4f1;
-  --warn:#a33b20; --warn-soft:#f8e4dd; --ok:#2d7a4a; --open:#c2410c;
+  --bg:#f3f7f2; --card:#ffffff; --fg:#111a14; --muted:#56645b; --line:#d9e3da;
+  --accent:#008231; --accent-fg:#ffffff; --accent-soft:#e2f2e5; --hover:#eef5ef;
+  --warn:#c5014b; --warn-soft:#fbe6ee; --ok:#008231; --open:#c5014b;
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color-scheme:light;
 }
-@media (prefers-color-scheme:dark){:root{
-  --bg:#101612; --card:#18211b; --fg:#e6ede8; --muted:#97a69c; --line:#2b372f;
-  --accent:#4fae7a; --accent-fg:#0b130e; --accent-soft:#1d3226; --hover:#1e2921;
-  --warn:#ef8a6b; --warn-soft:#3a201a; --ok:#6cc792; --open:#f59e5b; color-scheme:dark}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#0d120f; --card:#161d18; --fg:#e9f0ea; --muted:#9aa89f; --line:#29342c;
+  --accent:#4cb03a; --accent-fg:#07110a; --accent-soft:#17301b; --hover:#1d261f;
+  --warn:#ff6b9c; --warn-soft:#3b1426; --ok:#6cc56a; --open:#ff4f8b; color-scheme:dark}}
+:root[data-theme=dark]{
+  --bg:#0d120f; --card:#161d18; --fg:#e9f0ea; --muted:#9aa89f; --line:#29342c;
+  --accent:#4cb03a; --accent-fg:#07110a; --accent-soft:#17301b; --hover:#1d261f;
+  --warn:#ff6b9c; --warn-soft:#3b1426; --ok:#6cc56a; --open:#ff4f8b; color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font);display:flex;flex-direction:column}
@@ -81,6 +87,13 @@ td .sub{color:var(--muted);font-size:12px}
 .login input{width:100%;padding:10px 12px}
 .fout{color:var(--warn);font-weight:600}
 .leaflet-container{font:inherit}
+.merk{display:flex;align-items:center;gap:10px}
+.merk svg{width:34px;height:24px;flex:none}
+header.top{border-top:4px solid var(--accent)}
+/* donkere kaart: lichte kaarttegels omkeren */
+html[data-theme=dark] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}
+@media (prefers-color-scheme:dark){html:not([data-theme=light]) .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}}
+.leaflet-tooltip,.leaflet-bar a{background:var(--card);color:var(--fg);border-color:var(--line)}
 .detail .kop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
 .detail .sluit{background:none;font-size:20px;line-height:1;padding:2px 8px;color:var(--muted)}
 .stats .bulk{margin-left:auto}
@@ -123,9 +136,10 @@ td .sub{color:var(--muted);font-size:12px}
 
 <div id="app" hidden style="display:contents">
 <header class="top">
-  <h1>Prullenbakmelder · Kantoor</h1>
+  <div class="merk"><svg viewBox="0 0 40 28" aria-hidden="true"><polygon points="10,0 20,10 10,20 0,10" fill="#ce0858"/><polygon points="30,0 40,10 30,20 20,10" fill="#008231"/><polygon points="20,10 30,20 10,20" fill="#c7d300"/><polygon points="10,20 30,20 20,28" fill="#46a335"/></svg><h1>Prullenbakmelder · Kantoor</h1></div>
   <span class="sp"></span>
   <span class="who" id="who"></span>
+  <button class="ghost" id="thema" title="Weergave wisselen: automatisch / licht / donker"></button>
   <a class="btn" href="./">Naar de app</a>
   <button class="ghost" id="uit">Uitloggen</button>
 </header>
@@ -435,6 +449,21 @@ $("#csv").onclick = () => {
 };
 
 setInterval(() => { if (sessie && document.visibilityState === "visible") laad(true); }, 60000);
+/* ---------- weergave: automatisch → licht → donker ---------- */
+const THEMAS = { auto: "◐ Automatisch", licht: "☀︎ Licht", donker: "☾ Donker" };
+function huidigThema() { try { return localStorage.getItem("thema") || "auto"; } catch (e) { return "auto"; } }
+function zetThema(t) {
+  try { t === "auto" ? localStorage.removeItem("thema") : localStorage.setItem("thema", t); } catch (e) {}
+  if (t === "licht") document.documentElement.dataset.theme = "light";
+  else if (t === "donker") document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
+  $("#thema").textContent = THEMAS[t]; $("#thema").setAttribute("aria-label", "Weergave: " + THEMAS[t].slice(2));
+  if (kaart) tekenKaart(false);   // kleuren van de stippen opnieuw uitlezen
+}
+$("#thema").onclick = () => { const v = ["auto", "licht", "donker"]; zetThema(v[(v.indexOf(huidigThema()) + 1) % 3]); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => kaart && tekenKaart(false));
+zetThema(huidigThema());
+
 start();
 </script>
 </body>

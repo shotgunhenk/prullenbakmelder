@@ -103,8 +103,8 @@ export function maakHtml(dag, lijst) {
     <td style="padding:6px 10px;border-bottom:1px solid #ddd"><b>${esc(m.adres || "Onbekende plek")}</b>${m.tekst ? `<br><span style="color:#5d6b62">${esc(m.tekst)}</span>` : ""}</td>
     <td style="padding:6px 10px;border-bottom:1px solid #ddd">${esc(m.soorten.join(", "))}</td>
     <td style="padding:6px 10px;border-bottom:1px solid #ddd">${esc(m.melder)}</td></tr>`;
-  return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#17231c">
-    <h2 style="color:#1f5f3f;margin:0 0 4px">Meldingen prullenbakken</h2>
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111a14">
+    <h2 style="color:#008231;margin:0 0 4px">Meldingen prullenbakken</h2>
     <p style="margin:0 0 14px">${esc(dagLang(dag))}: <b>${lijst.length} melding${lijst.length === 1 ? "" : "en"}</b>. Het volledige rapport met foto's en kaartlinks zit als PDF in de bijlage.</p>
     <table style="border-collapse:collapse;font-size:13px"><tr style="text-align:left;color:#5d6b62"><th style="padding:6px 10px">Tijd</th><th style="padding:6px 10px">Plek</th><th style="padding:6px 10px">Probleem</th><th style="padding:6px 10px">Melder</th></tr>
     ${lijst.map(rij).join("")}</table></div>`;
